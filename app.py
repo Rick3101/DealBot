@@ -36,8 +36,8 @@ app = Flask(__name__)
 
 # === ADICIONA OS HANDLERS COMO FAZIA NO main.py
 def configurar_handlers():
-    app_bot.add_handler(start)
-    app_bot.add_handler(cancel)
+    app_bot.add_handler(CommandHandler("start", start))
+    app_bot.add_handler(CommandHandler("cancel", cancel))
     app_bot.add_handler(login_handler)
     app_bot.add_handler(get_user_conversation_handler())
     app_bot.add_handler(get_product_conversation_handler())

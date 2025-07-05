@@ -6,7 +6,7 @@ from telegram.ext import Application
 
 # ✅ Token do bot e domínio
 TOKEN = "7593794682:AAEqzdMTtkzGcJLdI_SGFjRSF50q4ntlIjo"
-RAILWAY_URL = os.getenv("RAILWAY_URL")  # Ex: 'meubot.up.railway.app'
+RAILWAY_URL = "web-production-32b2.up.railway.app"  # Ex: 'meubot.up.railway.app'
 if not TOKEN or not RAILWAY_URL:
     raise ValueError("❌ BOT_TOKEN ou RAILWAY_URL não definidos.")
 

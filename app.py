@@ -26,9 +26,13 @@ from handlers.smartcontract_handler import (
     confirmar_transacao_prompt,
     confirmar_transacao_exec
 )
+import os
+import asyncio
 
-# 🔐 Token
+# Token do bot
 TOKEN = os.environ.get("BOT_TOKEN")
+
+
 
 # 🗄️ Banco
 produto_service.init_db()
@@ -60,19 +64,19 @@ app_bot.add_handler(get_smartcontract_conversation_handler())
 app_bot.add_handler(CallbackQueryHandler(confirmar_transacao_prompt, pattern="^confirma_transacao:"))
 app_bot.add_handler(CallbackQueryHandler(confirmar_transacao_exec, pattern="^confirmar_"))
 
-# 🌐 Flask App
+# Flask
 flask_app = Flask(__name__)
 
 @flask_app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), app_bot.bot)
-    app_bot.update_queue.put_nowait(update)
+    asyncio.create_task(app_bot.process_update(update))
     return "ok"
 
 @flask_app.before_first_request
 def setup():
     url = f"https://{os.environ['RENDER_EXTERNAL_HOSTNAME']}/{TOKEN}"
-    app_bot.bot.set_webhook(url=url)
+    asyncio.create_task(app_bot.bot.set_webhook(url))
 
 if __name__ == "__main__":
     flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

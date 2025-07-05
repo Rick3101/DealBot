@@ -1,43 +1,36 @@
 import os
+import asyncio
 from flask import Flask, request
+from telegram import Update
 from telegram.ext import Application
-import telegram
 
-# ✅ Lê o token do ambiente
+# ✅ Token do bot e domínio
 TOKEN = "7593794682:AAEqzdMTtkzGcJLdI_SGFjRSF50q4ntlIjo"
+RAILWAY_URL = os.getenv("RAILWAY_URL")  # Ex: 'meubot.up.railway.app'
+if not TOKEN or not RAILWAY_URL:
+    raise ValueError("❌ BOT_TOKEN ou RAILWAY_URL não definidos.")
 
-if not TOKEN:
-    raise ValueError("❌ BOT_TOKEN não encontrado nas variáveis de ambiente.")
+WEBHOOK_PATH = f"/{TOKEN}"
+WEBHOOK_URL = f"https://{RAILWAY_URL}{WEBHOOK_PATH}"
 
-# ✅ Cria o bot
+# ✅ Cria bot
 app_bot = Application.builder().token(TOKEN).build()
 
-# ✅ Inicializa banco (opcional)
-# from services import produto_service
-# produto_service.init_db()
+# ✅ Flask app
+app = Flask(__name__)
 
-# ✅ Webhook path = token
-WEBHOOK_PATH = f"/{TOKEN}"
+# 🔗 Define webhook uma única vez
+@app.before_first_request
+def set_webhook_sync():
+    asyncio.run(app_bot.bot.set_webhook(url=WEBHOOK_URL))
 
-# ✅ Dominio do Railway
-RAILWAY_DOMAIN = os.getenv("RAILWAY_URL")  # Exemplo: myapp.up.railway.app
-WEBHOOK_URL = f"https://{RAILWAY_DOMAIN}{WEBHOOK_PATH}"
-
-# ✅ Cria app Flask
-flask_app = Flask(__name__)
-
-# ✅ Endpoint para Telegram enviar atualizações
-@flask_app.post(WEBHOOK_PATH)
-async def webhook():
-    update = telegram.Update.de_json(request.json, app_bot.bot)
+# 📬 Recebe mensagens via webhook
+@app.post(WEBHOOK_PATH)
+async def receive_update():
+    update = Update.de_json(request.json, app_bot.bot)
     await app_bot.process_update(update)
     return "OK"
 
-# ✅ Define webhook ao iniciar
-@flask_app.before_serving
-async def start_webhook():
-    await app_bot.bot.set_webhook(url=WEBHOOK_URL)
-
-# ✅ Inicia servidor Flask no Railway
+# 🚀 Inicia servidor no Railway
 if __name__ == "__main__":
-    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

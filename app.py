@@ -4,7 +4,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 import os
 import asyncio
 
-TOKEN = os.environ.get("BOT_TOKEN")
+TOKEN = "7593794682:AAEqzdMTtkzGcJLdI_SGFjRSF50q4ntlIjo"
 app_bot = Application.builder().token(TOKEN).build()
 
 # Comando /start

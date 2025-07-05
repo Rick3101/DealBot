@@ -34,37 +34,45 @@ TOKEN = os.environ.get("BOT_TOKEN")
 
 
 
-# 🗄️ Banco
-produto_service.init_db()
+# # 🗄️ Banco
+# produto_service.init_db()
 
-# 🤖 Telegram bot
+# # 🤖 Telegram bot
+# app_bot = Application.builder().token(TOKEN).build()
+
+# # Handlers
+# app_bot.add_handler(CommandHandler("start", start))
+# app_bot.add_handler(CommandHandler("cancel", cancel))
+# app_bot.add_handler(login_handler)
+# app_bot.add_handler(get_user_conversation_handler())
+# app_bot.add_handler(get_product_conversation_handler())
+# app_bot.add_handler(get_estoque_conversation_handler())
+# app_bot.add_handler(get_buy_conversation_handler())
+# app_bot.add_handler(CommandHandler("debitos", listar_debitos))
+# app_bot.add_handler(CallbackQueryHandler(selecionar_debito, pattern="^debito:"))
+# app_bot.add_handler(CallbackQueryHandler(marcar_pagamento, pattern="^pagar_"))
+# app_bot.add_handler(CommandHandler("pagar", pagar_vendas))
+# app_bot.add_handler(CallbackQueryHandler(confirmar_pagamento, pattern="^pagar:"))
+# app_bot.add_handler(CallbackQueryHandler(executar_pagamento, pattern="^confirmar_pagamento_"))
+# app_bot.add_handler(get_relatorios_conversation_handler())
+# app_bot.add_handler(exportar_csv_handler)
+# app_bot.add_handler(exportar_csv_detalhes_handler)
+# app_bot.add_handler(fechar_handler)
+# app_bot.add_handler(CommandHandler("lista_produtos", lista_produtos))
+# app_bot.add_handler(CommandHandler("smartcontract", criar_smart_contract))
+# app_bot.add_handler(get_smartcontract_conversation_handler())
+# app_bot.add_handler(CallbackQueryHandler(confirmar_transacao_prompt, pattern="^confirma_transacao:"))
+# app_bot.add_handler(CallbackQueryHandler(confirmar_transacao_exec, pattern="^confirmar_"))
+# Cria Application sem Updater
 app_bot = Application.builder().token(TOKEN).build()
 
-# Handlers
-app_bot.add_handler(CommandHandler("start", start))
-app_bot.add_handler(CommandHandler("cancel", cancel))
-app_bot.add_handler(login_handler)
-app_bot.add_handler(get_user_conversation_handler())
-app_bot.add_handler(get_product_conversation_handler())
-app_bot.add_handler(get_estoque_conversation_handler())
-app_bot.add_handler(get_buy_conversation_handler())
-app_bot.add_handler(CommandHandler("debitos", listar_debitos))
-app_bot.add_handler(CallbackQueryHandler(selecionar_debito, pattern="^debito:"))
-app_bot.add_handler(CallbackQueryHandler(marcar_pagamento, pattern="^pagar_"))
-app_bot.add_handler(CommandHandler("pagar", pagar_vendas))
-app_bot.add_handler(CallbackQueryHandler(confirmar_pagamento, pattern="^pagar:"))
-app_bot.add_handler(CallbackQueryHandler(executar_pagamento, pattern="^confirmar_pagamento_"))
-app_bot.add_handler(get_relatorios_conversation_handler())
-app_bot.add_handler(exportar_csv_handler)
-app_bot.add_handler(exportar_csv_detalhes_handler)
-app_bot.add_handler(fechar_handler)
-app_bot.add_handler(CommandHandler("lista_produtos", lista_produtos))
-app_bot.add_handler(CommandHandler("smartcontract", criar_smart_contract))
-app_bot.add_handler(get_smartcontract_conversation_handler())
-app_bot.add_handler(CallbackQueryHandler(confirmar_transacao_prompt, pattern="^confirma_transacao:"))
-app_bot.add_handler(CallbackQueryHandler(confirmar_transacao_exec, pattern="^confirmar_"))
+# Handler de exemplo
+async def start(update: Update, context):
+    await update.message.reply_text("🤖 Bot online e funcionando!")
 
-# Flask
+app_bot.add_handler(CommandHandler("start", start))
+
+# Flask App
 flask_app = Flask(__name__)
 
 @flask_app.route(f"/{TOKEN}", methods=["POST"])

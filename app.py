@@ -1,38 +1,42 @@
-from flask import Flask, request
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
 import os
-import asyncio
+from flask import Flask, request
+from telegram.ext import Application
+import telegram
 
-TOKEN = "7593794682:AAEqzdMTtkzGcJLdI_SGFjRSF50q4ntlIjo"
+# ✅ Lê o token do ambiente
+TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise ValueError("❌ BOT_TOKEN não encontrado nas variáveis de ambiente.")
+
+# ✅ Cria o bot
 app_bot = Application.builder().token(TOKEN).build()
 
-# Comando /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ Bot online!")
+# ✅ Inicializa banco (opcional)
+# from services import produto_service
+# produto_service.init_db()
 
-app_bot.add_handler(CommandHandler("start", start))
+# ✅ Webhook path = token
+WEBHOOK_PATH = f"/{TOKEN}"
 
-# ✅ Inicia Application manualmente
-async def initialize_bot():
-    await app_bot.initialize()
-    await app_bot.start()
-    # Webhook será definido automaticamente após isso
+# ✅ Dominio do Railway
+RAILWAY_DOMAIN = os.getenv("RAILWAY_URL")  # Exemplo: myapp.up.railway.app
+WEBHOOK_URL = f"https://{RAILWAY_DOMAIN}{WEBHOOK_PATH}"
 
-# Flask
+# ✅ Cria app Flask
 flask_app = Flask(__name__)
 
-@flask_app.route(f"/{TOKEN}", methods=["POST"])
+# ✅ Endpoint para Telegram enviar atualizações
+@flask_app.post(WEBHOOK_PATH)
 async def webhook():
-    update = Update.de_json(await request.get_json(force=True), app_bot.bot)
+    update = telegram.Update.de_json(request.json, app_bot.bot)
     await app_bot.process_update(update)
-    return "ok"
+    return "OK"
 
-@flask_app.before_first_request
-def setup_webhook():
-    url = f"https://{os.environ['RENDER_EXTERNAL_HOSTNAME']}/{TOKEN}"
-    asyncio.create_task(initialize_bot())
-    asyncio.create_task(app_bot.bot.set_webhook(url))
+# ✅ Define webhook ao iniciar
+@flask_app.before_serving
+async def start_webhook():
+    await app_bot.bot.set_webhook(url=WEBHOOK_URL)
 
+# ✅ Inicia servidor Flask no Railway
 if __name__ == "__main__":
     flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

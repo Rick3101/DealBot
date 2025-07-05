@@ -23,14 +23,12 @@ from handlers.relatorios_handler import (
 from handlers.lista_produtos_handler import lista_produtos
 from handlers.global_handlers import cancel
 
-# === VARIÁVEIS
-# ✅ Token do bot e domínio
-TOKEN = "7593794682:AAEqzdMTtkzGcJLdI_SGFjRSF50q4ntlIjo"
-RAILWAY_URL = "web-production-32b2.up.railway.app"  # Ex: 'meubot.up.railway.app'
+
+# ENV
+TOKEN = os.getenv("BOT_TOKEN") or "7593794682:AAEqzdMTtkzGcJLdI_SGFjRSF50q4ntlIjo"
+RAILWAY_URL = os.getenv("RAILWAY_URL") or "web-production-32b2.up.railway.app"
 WEBHOOK_PATH = f"/{TOKEN}"
 WEBHOOK_URL = f"https://{RAILWAY_URL}{WEBHOOK_PATH}"
-
-# === BOT + FLASK
 app_bot = Application.builder().token(TOKEN).build()
 app = Flask(__name__)
 
@@ -55,22 +53,29 @@ def configurar_handlers():
     app_bot.add_handler(fechar_handler)
     app_bot.add_handler(CommandHandler("lista_produtos", lista_produtos))
 
-# === CONFIGURA E INICIA O BOT
+# SETUP FLASK
+app = Flask(__name__)
+
+# SETUP BOT: initialize, set webhook, start
 async def setup_bot():
-    configurar_handlers()
     await app_bot.initialize()
     await app_bot.bot.set_webhook(url=WEBHOOK_URL)
     await app_bot.start()
 
 asyncio.run(setup_bot())
 
-# === RECEBE UPDATE DO TELEGRAM
+# WEBHOOK ENDPOINT
 @app.route(WEBHOOK_PATH, methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), app_bot.bot)
     asyncio.run(app_bot.process_update(update))
     return "OK", 200
 
-# === INICIA FLASK
+# SAÚDE (opcional)
+@app.route("/")
+def health():
+    return "Bot online ✔️", 200
+
+# FLASK START
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

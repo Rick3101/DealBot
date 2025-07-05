@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: dealbot-docker
+    env: python
+    plan: free
+    region: oregon
+    buildCommand: ""
+    startCommand: python app.py
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: BOT_TOKEN
+        sync: false  # você vai definir isso no painel do Render depois

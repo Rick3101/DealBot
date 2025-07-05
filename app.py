@@ -4,7 +4,8 @@ from telegram.ext import Application
 import telegram
 
 # ✅ Lê o token do ambiente
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = "7593794682:AAEqzdMTtkzGcJLdI_SGFjRSF50q4ntlIjo"
+
 if not TOKEN:
     raise ValueError("❌ BOT_TOKEN não encontrado nas variáveis de ambiente.")
 

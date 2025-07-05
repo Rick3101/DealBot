@@ -13,22 +13,22 @@ if not TOKEN or not RAILWAY_URL:
 WEBHOOK_PATH = f"/{TOKEN}"
 WEBHOOK_URL = f"https://{RAILWAY_URL}{WEBHOOK_PATH}"
 
-# ✅ Cria aplicação Telegram
+# ✅ Bot do Telegram
 app_bot = Application.builder().token(TOKEN).build()
 
-# ✅ Seta o webhook imediatamente
+# ✅ Seta o webhook ao iniciar
 asyncio.run(app_bot.bot.set_webhook(url=WEBHOOK_URL))
 
-# ✅ Cria o Flask app
+# ✅ App Flask
 app = Flask(__name__)
 
-# 📬 Recebe atualizações
-@app.post(WEBHOOK_PATH)
-async def webhook():
-    update = Update.de_json(request.json, app_bot.bot)
-    await app_bot.process_update(update)
-    return "OK"
+# 📬 Endpoint síncrono que chama async
+@app.route(WEBHOOK_PATH, methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), app_bot.bot)
+    asyncio.run(app_bot.process_update(update))
+    return "OK", 200
 
-# 🚀 Inicia o servidor (no Railway)
+# 🚀 Executa
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

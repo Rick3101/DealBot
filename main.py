@@ -24,7 +24,7 @@ import sys
 TOKEN = "7593794682:AAEqzdMTtkzGcJLdI_SGFjRSF50q4ntlIjo"
 
 # 🌍 URL pública gerada pelo ngrok ou domínio
-WEBHOOK_URL = f"https://f1ff-2804-1b3-a7c0-30b0-3c1b-5867-5a5f-99fd.ngrok-free.app/{TOKEN}"
+WEBHOOK_URL = f"https://777b-2804-1b3-a7c0-d599-f9bf-ac44-a52b-8d26.ngrok-free.app/{TOKEN}"
 
 
 logging.basicConfig(
@@ -52,8 +52,6 @@ print("🔥 App rodando. Handlers carregados.")
 
 
 # 🔥 Login Conversation Handler
-
-
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("cancel", cancel))
 app.add_handler(get_user_conversation_handler())
@@ -86,3 +84,4 @@ app.run_webhook(
     webhook_url=WEBHOOK_URL
 )
 
+print("HERE")

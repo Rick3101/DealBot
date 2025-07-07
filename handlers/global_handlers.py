@@ -33,3 +33,4 @@ async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.reply_text("🚫 Operação cancelada.")
 
     return ConversationHandler.END
+

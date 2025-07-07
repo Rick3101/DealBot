@@ -4,31 +4,26 @@ from telegram.ext import (
     ConversationHandler,
     CommandHandler,
     MessageHandler,
-    filters
+    filters,
 )
 from utils.message_cleaner import send_and_delete, delayed_delete
 import asyncio
 import services.produto_service as produto_service
 
-
 # 🔸 Estados
 LOGIN_USERNAME, LOGIN_PASSWORD = range(2)
 
-
-# 🔸 Funções do fluxo
+# 🔸 Entradas
 async def start_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_and_delete("📝 Por favor, envie seu nome de usuário:", update, context)
     return LOGIN_USERNAME
-
 
 async def received_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["username_login"] = update.message.text
 
     asyncio.create_task(delayed_delete(update.message, context, delay=10))
-
     await send_and_delete("🔒 Agora envie sua senha:", update, context)
     return LOGIN_PASSWORD
-
 
 async def received_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = context.user_data.get("username_login")
@@ -44,13 +39,10 @@ async def received_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return ConversationHandler.END
 
-
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_and_delete("🚫 Login cancelado.", update, context)
     return ConversationHandler.END
 
-
-# 🔥 🔗 ConversationHandler configurado aqui
 login_handler = ConversationHandler(
     entry_points=[CommandHandler("login", start_login)],
     states={
@@ -58,4 +50,5 @@ login_handler = ConversationHandler(
         LOGIN_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_password)],
     },
     fallbacks=[CommandHandler("cancel", cancel)],
+    allow_reentry=True
 )

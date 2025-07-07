@@ -5,7 +5,9 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from utils.message_cleaner import send_and_delete
 from utils.permissions import require_permission
+from utils.lock_conversation import lock_conversation
 
+@lock_conversation
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):    
     
     logger.info("→ Entrando em start()")

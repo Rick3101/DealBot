@@ -11,7 +11,7 @@ from queue import Queue
 
 # === CONFIGURAÇÃO ===
 TOKEN = os.getenv("BOT_TOKEN") or "7593794682:AAEqzdMTtkzGcJLdI_SGFjRSF50q4ntlIjo"
-RAILWAY_URL = os.getenv("RAILWAY_URL") or "https://f6cc-2804-1b3-a7c0-d599-48da-94a2-1b1e-1810.ngrok-free.app"
+RAILWAY_URL = os.getenv("RAILWAY_URL") or "https://web-production-32b2.up.railway.app"
 WEBHOOK_PATH = f"/{TOKEN}"
 WEBHOOK_URL = f"{RAILWAY_URL}{WEBHOOK_PATH}"
 

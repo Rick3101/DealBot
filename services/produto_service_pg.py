@@ -323,3 +323,10 @@ def obter_precos_medios():
                 GROUP BY p.id, p.nome
             """)
             return c.fetchall()
+
+def get_media_file_id(produto_id):
+    with closing(get_connection()) as conn:
+        with conn.cursor() as c:
+            c.execute("SELECT media_file_id FROM Produtos WHERE id = %s", (produto_id,))
+            row = c.fetchone()
+            return row[0] if row else None

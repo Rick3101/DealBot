@@ -32,12 +32,15 @@ BUY_NAME, BUY_SELECT_PRODUCT, BUY_QUANTITY, BUY_PRICE = range(4)
 
 
 # 🔘 Teclado com produtos + finalizar compra
-def gerar_keyboard_comprar():
+def gerar_keyboard_comprar(nivel):
     produtos = produto_service.listar_produtos_com_estoque()
     keyboard = []
 
     for pid, nome, emoji, quantidade in produtos:
-        display_text = f"{emoji} {nome} — {quantidade} unidades"
+        if nivel == "owner":
+            display_text = f"{emoji} {nome} — {quantidade} unidades"
+        else:
+            display_text = f"{emoji} {nome}"
         keyboard.append([InlineKeyboardButton(display_text, callback_data=f"buyproduct:{pid}")])
 
     keyboard.append([
@@ -45,7 +48,6 @@ def gerar_keyboard_comprar():
         InlineKeyboardButton("🚫 Cancelar", callback_data="buy_cancelar")
     ])
     return InlineKeyboardMarkup(keyboard)
-
 
 # 🚀 Início do /buy
 async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):    
@@ -77,7 +79,7 @@ async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🛒 Compra registrada em nome de: *{nome}*\nEscolha o produto:",
             update,
             context,
-            gerar_keyboard_comprar(),
+            gerar_keyboard_comprar(nivel),
             delay=10,
             protected=False
         )
@@ -92,11 +94,12 @@ async def buy_set_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("→ Entrando em buy_set_name()")
 
     context.user_data["nome_comprador"] = update.message.text
+    nivel = context.user_data.get("nivel")
     await send_menu_with_delete(
         "🛒 Escolha o produto:",
         update,
         context,
-        gerar_keyboard_comprar(),
+        gerar_keyboard_comprar(nivel),
         delay =10,
         protected=False
 
@@ -165,11 +168,12 @@ async def buy_set_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["itens_venda"].append(item)
 
+    nivel = context.user_data.get("nivel")
     await send_menu_with_delete(
         "🛒 Produto adicionado! Escolha outro ou finalize a compra.",
         update,
         context,
-        gerar_keyboard_comprar()
+        gerar_keyboard_comprar(nivel)
     )
     return BUY_SELECT_PRODUCT
 

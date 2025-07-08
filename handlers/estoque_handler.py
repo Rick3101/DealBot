@@ -217,7 +217,8 @@ def get_estoque_conversation_handler():
                 CallbackQueryHandler(estoque_select_product)
             ],
             ESTOQUE_ADD_VALUES: [
-                MessageHandler(filters.Regex(r"^\s*\d+\s*/\s*\d+(\.\d+)?\s*/\s*\d+(\.\d+)?\s*$"), estoque_receive_values)
+                MessageHandler(filters.Regex(r"^\s*\d+\s*/\s*\d+(\.\d+)?\s*/\s*\d+(\.\d+)?\s*$"), estoque_receive_values),
+                CallbackQueryHandler(finalizar_estoque, pattern="^finalizar_estoque$"),
             ],
         },
         fallbacks=[

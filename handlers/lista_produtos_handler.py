@@ -39,7 +39,9 @@ async def lista_produtos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     async with lock:
         produtos = produto_service.listar_produtos_com_estoque()
-        precos = dict(produto_service.obter_precos_medios())
+        precos = {
+            nome: preco for _, nome, preco in produto_service.obter_precos_medios()
+        }
 
         if not produtos:
             await context.bot.send_message(chat_id=chat_id, text="🚫 Nenhum produto com estoque.")

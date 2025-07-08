@@ -359,3 +359,34 @@ def validar_estoque_suficiente(itens):
                     return False, produto_id, disponivel
 
     return True, None, None
+
+def consumir_estoque_fifo(produto_id, quantidade_necessaria):
+    with get_connection() as conn:
+        with conn.cursor() as c:
+            # Busca entradas de estoque mais antigas primeiro
+            c.execute("""
+                SELECT id, quantidade
+                FROM Estoque
+                WHERE produto_id = %s
+                ORDER BY data ASC
+            """, (produto_id,))
+            lotes = c.fetchall()
+
+            for estoque_id, qtd in lotes:
+                if quantidade_necessaria <= 0:
+                    break
+
+                if qtd <= quantidade_necessaria:
+                    # Consome tudo e remove o lote
+                    c.execute("DELETE FROM Estoque WHERE id = %s", (estoque_id,))
+                    quantidade_necessaria -= qtd
+                else:
+                    # Atualiza o lote com o restante
+                    c.execute("""
+                        UPDATE Estoque
+                        SET quantidade = quantidade - %s
+                        WHERE id = %s
+                    """, (quantidade_necessaria, estoque_id))
+                    quantidade_necessaria = 0
+
+            conn.commit()

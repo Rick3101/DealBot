@@ -220,6 +220,7 @@ async def finalizar_compra(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for produto_id, quantidade, preco in dados:
         produto_service.registrar_item_venda(venda_id, produto_id, quantidade, preco)
+        produto_service.consumir_estoque_fifo(produto_id, quantidade)
 
     await send_and_delete("✅ Compra finalizada e estoque atualizado!", update, context)
     return ConversationHandler.END

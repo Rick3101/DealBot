@@ -309,3 +309,17 @@ def deletar_smartcontract(contract_id):
             deletar_transacoes_por_contrato(contract_id)
             c.execute("DELETE FROM SmartContracts WHERE id = %s", (contract_id,))
             conn.commit()
+
+def obter_precos_medios():
+    with closing(get_connection()) as conn:
+        with conn.cursor() as c:
+            c.execute("""
+                SELECT
+                    p.id,
+                    p.nome,
+                    ROUND(AVG(e.valor), 2) as preco_medio
+                FROM Produtos p
+                JOIN Estoque e ON p.id = e.produto_id
+                GROUP BY p.id, p.nome
+            """)
+            return c.fetchall()

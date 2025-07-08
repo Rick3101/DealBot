@@ -70,6 +70,7 @@ def configurar_handlers(app_bot):
     app_bot.add_handler(exportar_csv_detalhes_handler)
     app_bot.add_handler(fechar_handler)
     app_bot.add_handler(get_smartcontract_conversation_handler())
+    app_bot.add_handler(get_buy_conversation_handler()) 
 
     from telegram.ext import CommandHandler, CallbackQueryHandler
     app_bot.add_handler(CommandHandler("start", start))

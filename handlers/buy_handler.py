@@ -235,6 +235,7 @@ def get_buy_conversation_handler():
             BUY_SELECT_PRODUCT: [
                 CallbackQueryHandler(buy_select_product, pattern="^buyproduct:"),
                 CallbackQueryHandler(finalizar_compra, pattern="^buy_finalizar$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, checar_menu_secreto)  # 👈 NOVA FUNÇÃO
             ],
             BUY_QUANTITY: [
                 MessageHandler(filters.Regex(r"^\d+$"), buy_set_quantity)
@@ -389,3 +390,42 @@ async def executar_pagamento(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await send_and_delete(f"✅ Venda #{venda_id} marcada como paga.",update,context)
     else:
         await send_and_delete("❌ Pagamento cancelado.",update,context)
+
+async def checar_menu_secreto(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texto = update.message.text.strip()
+
+    if texto.lower() == "wubba lubba dub dub":
+        nivel = context.user_data.get("nivel")
+
+        produtos_secretos = [
+            (pid, nome, emoji, qtd)
+            for pid, nome, emoji, qtd in produto_service.listar_produtos_com_estoque()
+            if emoji in {"🧪", "💀"}  # 👈 defina os emojis secretos
+        ]
+
+        if not produtos_secretos:
+            await send_and_delete("🧙‍♂️ Nenhum item secreto disponível.", update, context)
+            return BUY_SELECT_PRODUCT
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"{emoji} {nome}", callback_data=f"buyproduct:{pid}")]
+            for pid, nome, emoji, qtd in produtos_secretos
+        ])
+        keyboard.inline_keyboard.append([
+            InlineKeyboardButton("✅ Finalizar Compra", callback_data="buy_finalizar"),
+            InlineKeyboardButton("🚫 Cancelar", callback_data="buy_cancelar")
+        ])
+
+        await send_menu_with_delete(
+            "🧪 Itens secretos desbloqueados! Escolha um:",
+            update,
+            context,
+            keyboard,
+            delay=10,
+            protected=False
+        )
+        return BUY_SELECT_PRODUCT
+
+    # Se não for o código secreto, apenas avisa
+    await send_and_delete("❓ Comando não reconhecido. Use os botões para selecionar.", update, context)
+    return BUY_SELECT_PRODUCT

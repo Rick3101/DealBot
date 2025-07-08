@@ -38,20 +38,21 @@ def gerar_keyboard_comprar(nivel):
     keyboard = []
 
     for pid, nome, emoji, quantidade in produtos:
+        if emoji in {"🧪", "💀"}:
+            continue  # ⛔️ Pula itens secretos
+
         if nivel == "owner":
             display_text = f"{emoji} {nome} — {quantidade} unidades"
         else:
             display_text = f"{emoji} {nome}"
-        keyboard.append([InlineKeyboardButton(display_text, callback_data=f"buyproduct:{pid}")])
 
-    logger.info(f"Nível: {nivel}")
+        keyboard.append([InlineKeyboardButton(display_text, callback_data=f"buyproduct:{pid}")])
 
     keyboard.append([
         InlineKeyboardButton("✅ Finalizar Compra", callback_data="buy_finalizar"),
         InlineKeyboardButton("🚫 Cancelar", callback_data="buy_cancelar")
     ])
     return InlineKeyboardMarkup(keyboard)
-
 
 # 🚀 Início do /buy
 async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):    

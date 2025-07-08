@@ -1,3 +1,4 @@
+import datetime
 import logging
 logger = logging.getLogger(__name__)
 import csv
@@ -77,6 +78,8 @@ async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif nivel == "admin":
         nome = produto_service.obter_username_por_chat_id(chat_id)
         context.user_data["nome_comprador"] = nome
+        
+        logger.info(f"🧪 chat_id={chat_id} → nome={nome}")
 
         await send_menu_with_delete(
             f"🛒 Compra registrada em nome de: *{nome}*\nEscolha o produto:",
@@ -196,7 +199,7 @@ async def finalizar_compra(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not itens:
         await send_and_delete("❌ Nenhum item adicionado na compra.", update, context)
         return ConversationHandler.END
-    
+
     dados = [(int(i["produto_id"]), int(i["quantidade"]), float(i["preco"])) for i in itens]
 
     valido, problema_id, disponivel = produto_service.validar_estoque_suficiente(dados)
@@ -212,7 +215,11 @@ async def finalizar_compra(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
 
-    produto_service.registrar_venda(nome, dados)
+    # ✅ Registrar venda e itens corretamente
+    venda_id = produto_service.registrar_venda(nome, datetime.now(), pago=False)
+
+    for produto_id, quantidade, preco in dados:
+        produto_service.registrar_item_venda(venda_id, produto_id, quantidade, preco)
 
     await send_and_delete("✅ Compra finalizada e estoque atualizado!", update, context)
     return ConversationHandler.END

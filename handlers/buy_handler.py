@@ -236,7 +236,7 @@ def get_buy_conversation_handler():
             BUY_SELECT_PRODUCT: [
                 CallbackQueryHandler(buy_select_product, pattern="^buyproduct:"),
                 CallbackQueryHandler(finalizar_compra, pattern="^buy_finalizar$"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, checar_menu_secreto)  # 👈 NOVA FUNÇÃO
+                MessageHandler(filters.TEXT & ~filters.COMMAND, checar_menu_secreto),  # 👈 ISSO É ESSENCIAL
             ],
             BUY_QUANTITY: [
                 MessageHandler(filters.Regex(r"^\d+$"), buy_set_quantity)
@@ -395,13 +395,15 @@ async def executar_pagamento(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def checar_menu_secreto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = update.message.text.strip()
 
+    logger.info(f"🧪 Recebido no BUY_SELECT_PRODUCT: {texto}")
+
     if texto.lower() == "wubba lubba dub dub":
         nivel = context.user_data.get("nivel")
 
         produtos_secretos = [
             (pid, nome, emoji, qtd)
             for pid, nome, emoji, qtd in produto_service.listar_produtos_com_estoque()
-            if emoji in {"🧪", "💀"}  # 👈 defina os emojis secretos
+            if emoji in {"🧪", "💀"}  # ou seus emojis secretos
         ]
 
         if not produtos_secretos:
@@ -427,6 +429,5 @@ async def checar_menu_secreto(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return BUY_SELECT_PRODUCT
 
-    # Se não for o código secreto, apenas avisa
     await send_and_delete("❓ Comando não reconhecido. Use os botões para selecionar.", update, context)
     return BUY_SELECT_PRODUCT

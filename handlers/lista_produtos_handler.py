@@ -38,7 +38,11 @@ async def lista_produtos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     async with lock:
-        produtos = produto_service.listar_produtos_com_estoque()
+        produtos = [
+            (pid, nome, emoji, qtd)
+            for pid, nome, emoji, qtd in produto_service.listar_produtos_com_estoque()
+            if emoji not in {"🧪", "💀"}  # ⛔️ OCULTA itens secretos
+        ]      
         precos = {
             nome: preco for _, nome, preco in produto_service.obter_precos_medios()
         }

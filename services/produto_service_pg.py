@@ -95,6 +95,14 @@ def listar_todos_produtos():
             c.execute("SELECT id, nome, emoji FROM Produtos ORDER BY nome")
             return c.fetchall()
 
+def obter_nome_produto(produto_id):
+    with get_connection() as conn:
+        with conn.cursor() as c:
+            c.execute("SELECT nome FROM Produtos WHERE id = %s", (produto_id,))
+            row = c.fetchone()
+            return row[0] if row else "Produto Desconhecido"
+
+
 def verificar_produto_existe(nome):
     with closing(get_connection()) as conn:
         with conn.cursor() as c:
@@ -390,3 +398,4 @@ def consumir_estoque_fifo(produto_id, quantidade_necessaria):
                     quantidade_necessaria = 0
 
             conn.commit()
+

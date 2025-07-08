@@ -4,3 +4,4 @@ python-dotenv==1.0.1
 python-telegram-bot[webhooks]==20.6
 nest_asyncio
 httpx
+psycopg2

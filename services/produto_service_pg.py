@@ -338,3 +338,24 @@ def obter_username_por_chat_id(chat_id):
             c.execute("SELECT username FROM Usuarios WHERE chat_id = %s", (chat_id,))
             row = c.fetchone()
             return row[0] if row else None
+
+def validar_estoque_suficiente(itens):
+    """
+    Verifica se há estoque suficiente para todos os itens da venda.
+    itens: lista de tuplas (produto_id, quantidade, preco)
+    Retorna: (True, None, None) se tudo ok
+             (False, produto_id, disponivel) se algum produto estiver em falta
+    """
+    with get_connection() as conn:
+        with conn.cursor() as c:
+            for produto_id, quantidade, _ in itens:
+                c.execute(
+                    "SELECT COALESCE(SUM(quantidade), 0) FROM Estoque WHERE produto_id = %s",
+                    (produto_id,)
+                )
+                disponivel = c.fetchone()[0]
+
+                if disponivel < quantidade:
+                    return False, produto_id, disponivel
+
+    return True, None, None

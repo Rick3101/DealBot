@@ -410,14 +410,17 @@ async def checar_menu_secreto(update: Update, context: ContextTypes.DEFAULT_TYPE
             await send_and_delete("🧙‍♂️ Nenhum item secreto disponível.", update, context)
             return BUY_SELECT_PRODUCT
 
-        keyboard = InlineKeyboardMarkup([
+        teclado = [
             [InlineKeyboardButton(f"{emoji} {nome}", callback_data=f"buyproduct:{pid}")]
             for pid, nome, emoji, qtd in produtos_secretos
-        ])
-        keyboard.inline_keyboard.append([
+        ]
+
+        teclado.append([
             InlineKeyboardButton("✅ Finalizar Compra", callback_data="buy_finalizar"),
             InlineKeyboardButton("🚫 Cancelar", callback_data="buy_cancelar")
         ])
+
+        keyboard = InlineKeyboardMarkup(teclado)
 
         await send_menu_with_delete(
             "🧪 Itens secretos desbloqueados! Escolha um:",

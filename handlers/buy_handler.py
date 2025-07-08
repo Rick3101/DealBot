@@ -43,11 +43,14 @@ def gerar_keyboard_comprar(nivel):
             display_text = f"{emoji} {nome}"
         keyboard.append([InlineKeyboardButton(display_text, callback_data=f"buyproduct:{pid}")])
 
+    logger.info(f"Nível: {nivel}")
+
     keyboard.append([
         InlineKeyboardButton("✅ Finalizar Compra", callback_data="buy_finalizar"),
         InlineKeyboardButton("🚫 Cancelar", callback_data="buy_cancelar")
     ])
     return InlineKeyboardMarkup(keyboard)
+
 
 # 🚀 Início do /buy
 async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):    

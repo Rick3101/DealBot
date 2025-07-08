@@ -1,4 +1,3 @@
-import datetime
 import logging
 logger = logging.getLogger(__name__)
 import csv
@@ -27,6 +26,7 @@ from utils.message_cleaner import (
 import services.produto_service_pg as produto_service
 from handlers.global_handlers import cancel, cancel_callback
 from utils.permissions import require_permission
+from datetime import datetime
 
 # 🔥 Estados
 BUY_NAME, BUY_SELECT_PRODUCT, BUY_QUANTITY, BUY_PRICE = range(4)

@@ -49,25 +49,43 @@ def gerar_keyboard_comprar():
 
 # 🚀 Início do /buy
 async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):    
-    
     logger.info("→ Entrando em start_buy()")
 
-    # ✅ Encerrar conversa anterior
     context.user_data.clear()
     context.chat_data.clear()
-
     context.user_data["itens_venda"] = []
 
-    await send_and_delete(
-        "🧾 Qual o nome do comprador?",
-        update,
-        context,
-        delay=10,
-        protected=False
-    )
-    return BUY_NAME
+    chat_id = update.effective_chat.id
+    nivel = produto_service.obter_nivel(chat_id)
+    context.user_data["nivel"] = nivel
 
+    if nivel == "owner":
+        await send_and_delete(
+            "🧾 Qual o nome do comprador?",
+            update,
+            context,
+            delay=10,
+            protected=False
+        )
+        return BUY_NAME
+    
+    elif nivel == "admin":
+        nome = produto_service.obter_username_por_chat_id(chat_id)
+        context.user_data["nome_comprador"] = nome
 
+        await send_menu_with_delete(
+            f"🛒 Compra registrada em nome de: *{nome}*\nEscolha o produto:",
+            update,
+            context,
+            gerar_keyboard_comprar(),
+            delay=10,
+            protected=False
+        )
+        return BUY_SELECT_PRODUCT
+
+    else:
+        await send_and_delete("⛔ Permissão insuficiente para realizar compras.", update, context)
+        return ConversationHandler.END
 
 # ▶️ Recebe nome do comprador
 async def buy_set_name(update: Update, context: ContextTypes.DEFAULT_TYPE):    

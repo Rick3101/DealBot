@@ -330,3 +330,11 @@ def get_media_file_id(produto_id):
             c.execute("SELECT media_file_id FROM Produtos WHERE id = %s", (produto_id,))
             row = c.fetchone()
             return row[0] if row else None
+
+
+def obter_username_por_chat_id(chat_id):
+    with get_connection() as conn:
+        with conn.cursor() as c:
+            c.execute("SELECT username FROM Usuarios WHERE chat_id = %s", (chat_id,))
+            row = c.fetchone()
+            return row[0] if row else None

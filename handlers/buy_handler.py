@@ -176,12 +176,38 @@ async def buy_set_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["itens_venda"].append(item)
 
     nivel = context.user_data.get("nivel")
-    await send_menu_with_delete(
-        "🛒 Produto adicionado! Escolha outro ou finalize a compra.",
-        update,
-        context,
-        gerar_keyboard_comprar(nivel)
-    )
+    modo_secreto = context.user_data.get("modo_secreto", False)
+    if modo_secreto:
+        produtos_secretos = [
+            (pid, nome, emoji, qtd)
+            for pid, nome, emoji, qtd in produto_service.listar_produtos_com_estoque()
+            if emoji in {"🧪", "💀"}
+        ]
+
+        teclado = [
+            [InlineKeyboardButton(f"{emoji} {nome}", callback_data=f"buyproduct:{pid}")]
+            for pid, nome, emoji, qtd in produtos_secretos
+        ]
+
+        teclado.append([
+            InlineKeyboardButton("✅ Finalizar Compra", callback_data="buy_finalizar"),
+            InlineKeyboardButton("🚫 Cancelar", callback_data="buy_cancelar")
+        ])
+
+        await send_menu_with_delete(
+            "🧪 Produto secreto adicionado! Escolha outro ou finalize:",
+            update,
+            context,
+            keyboard=InlineKeyboardMarkup(teclado)
+        )
+    else:
+        await send_menu_with_delete(
+            "🛒 Produto adicionado! Escolha outro ou finalize a compra.",
+            update,
+            context,
+            gerar_keyboard_comprar(nivel)
+        )
+
     return BUY_SELECT_PRODUCT
 
 
@@ -222,7 +248,7 @@ async def finalizar_compra(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for produto_id, quantidade, preco in dados:
         produto_service.registrar_item_venda(venda_id, produto_id, quantidade, preco)
         produto_service.consumir_estoque_fifo(produto_id, quantidade)
-
+    context.user_data.pop("modo_secreto", None)
     await send_and_delete("✅ Compra finalizada e estoque atualizado!", update, context)
     return ConversationHandler.END
 

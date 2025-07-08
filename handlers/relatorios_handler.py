@@ -17,7 +17,7 @@ from telegram.ext import (
     MessageHandler
 )
 
-import services.produto_service as produto_service
+import services.produto_service_pg as produto_service
 from utils.message_cleaner import delete_protected_message, send_and_delete, send_menu_with_delete , enviar_documento_temporario
 from handlers.global_handlers import cancel_callback
 from utils.permissions import require_permission

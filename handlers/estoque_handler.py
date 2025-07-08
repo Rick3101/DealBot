@@ -20,7 +20,7 @@ from utils.message_cleaner import (
     get_effective_message
 )
 from handlers.global_handlers import cancel, cancel_callback
-import services.produto_service as produto_service
+import services.produto_service_pg as produto_service
 
 
 # 🔥 Estados

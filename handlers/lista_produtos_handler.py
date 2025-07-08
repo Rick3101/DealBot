@@ -2,7 +2,7 @@ import logging
 logger = logging.getLogger(__name__)
 from telegram import Update, Message
 from telegram.ext import ContextTypes
-import services.produto_service as produto_service
+import services.produto_service_pg as produto_service
 import asyncio
 import telegram
 from utils.permissions import require_permission

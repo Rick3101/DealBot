@@ -23,7 +23,7 @@ from utils.message_cleaner import (
     send_and_delete,
     get_effective_message
 )
-import services.produto_service as produto_service
+import services.produto_service_pg as produto_service
 from handlers.global_handlers import cancel, cancel_callback
 from utils.permissions import require_permission
 

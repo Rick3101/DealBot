@@ -2,7 +2,7 @@ from telegram.ext import MessageHandler, filters, Application, CommandHandler , 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from handlers.start_handler import start
 from handlers.login_handler import login_handler
-import services.produto_service as produto_service
+import services.produto_service_pg as produto_service
 from handlers.user_handler import get_user_conversation_handler
 from handlers.global_handlers import cancel
 from handlers.product_handler import get_product_conversation_handler

@@ -1,7 +1,7 @@
 import logging
 logger = logging.getLogger(__name__)
 
-import services.produto_service as produto_service
+import services.produto_service_pg as produto_service
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ContextTypes, ConversationHandler, CommandHandler,

@@ -1,6 +1,6 @@
 from telegram import Update
 from telegram.ext import ContextTypes
-import services.produto_service as produto_service
+import services.produto_service_pg as produto_service
 from utils.message_cleaner import send_and_delete
 from functools import wraps
 

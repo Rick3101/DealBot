@@ -8,7 +8,7 @@ from telegram.ext import (
 )
 from utils.message_cleaner import send_and_delete, delayed_delete
 import asyncio
-import services.produto_service as produto_service
+import services.produto_service_pg as produto_service
 
 # 🔸 Estados
 LOGIN_USERNAME, LOGIN_PASSWORD = range(2)

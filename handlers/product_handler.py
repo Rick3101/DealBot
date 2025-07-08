@@ -21,7 +21,7 @@ from utils.message_cleaner import (
     delete_protected_message
 )
 from utils.permissions import require_permission
-import services.produto_service as produto_service
+import services.produto_service_pg as produto_service
 from handlers.global_handlers import cancel, cancel_callback
 
 

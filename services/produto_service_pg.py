@@ -399,3 +399,32 @@ def consumir_estoque_fifo(produto_id, quantidade_necessaria):
 
             conn.commit()
 
+
+def listar_vendas_em_aberto(filtro_nome=None):
+    with get_connection() as conn:
+        with conn.cursor() as c:
+            query = """
+                SELECT
+                    v.id,
+                    v.comprador,
+                    SUM(i.quantidade * i.valor_unitario) as total,
+                    COALESCE(p.total_pago, 0) as pago
+                FROM Vendas v
+                JOIN ItensVenda i ON v.id = i.venda_id
+                LEFT JOIN (
+                    SELECT venda_id, SUM(valor) as total_pago
+                    FROM Pagamentos
+                    GROUP BY venda_id
+                ) p ON v.id = p.venda_id
+            """
+            params = []
+
+            if filtro_nome:
+                query += " WHERE LOWER(v.comprador) LIKE LOWER(%s)"
+                params.append(f"%{filtro_nome}%")
+
+            query += " GROUP BY v.id, v.comprador, p.total_pago HAVING COALESCE(p.total_pago, 0) < SUM(i.quantidade * i.valor_unitario)"
+            query += " ORDER BY v.id DESC"
+
+            c.execute(query, tuple(params))
+            return c.fetchall()

@@ -36,7 +36,7 @@ from handlers.relatorios_handler import (
     exportar_csv_detalhes_handler,
     fechar_handler,
 )
-from handlers.buy_handler import get_buy_conversation_handler , iniciar_pagamento_parcial, listar_debitos, selecionar_debito, marcar_pagamento, pagar_vendas, confirmar_pagamento, executar_pagamento
+from handlers.buy_handler import get_buy_conversation_handler 
 from handlers.user_handler import get_user_conversation_handler
 from handlers.smartcontract_handler import (
     criar_smart_contract,

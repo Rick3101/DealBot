@@ -455,3 +455,15 @@ def listar_vendas_nao_pagas(nome_comprador=None):
             base_query += " ORDER BY v.id DESC"
             c.execute(base_query, tuple(params))
             return c.fetchall()
+
+def obter_estoque_detalhado():
+    with get_connection() as conn:
+        with conn.cursor() as c:
+            c.execute("""
+                SELECT p.nome, p.emoji, COALESCE(SUM(e.quantidade), 0)
+                FROM Estoque e
+                JOIN Produtos p ON e.produto_id = p.id
+                GROUP BY p.nome, p.emoji
+                ORDER BY p.nome
+            """)
+            return c.fetchall()

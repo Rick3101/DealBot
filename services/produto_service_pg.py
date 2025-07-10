@@ -435,3 +435,23 @@ def obter_username_por_chat_id(chat_id):
         c.execute("SELECT username FROM Usuarios WHERE chat_id = ?", (chat_id,))
         row = c.fetchone()
         return row[0] if row else None
+
+def listar_vendas_nao_pagas(nome_comprador=None):
+    with get_connection() as conn:
+        with conn.cursor() as c:
+            base_query = """
+                SELECT v.id, v.comprador, p.nome, iv.quantidade, iv.valor_unitario
+                FROM Vendas v
+                JOIN ItensVenda iv ON v.id = iv.venda_id
+                JOIN Produtos p ON iv.produto_id = p.id
+                WHERE v.pago = FALSE
+            """
+            params = []
+
+            if nome_comprador:
+                base_query += " AND LOWER(v.comprador) = LOWER(%s)"
+                params.append(nome_comprador)
+
+            base_query += " ORDER BY v.id DESC"
+            c.execute(base_query, tuple(params))
+            return c.fetchall()

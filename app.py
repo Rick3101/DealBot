@@ -83,7 +83,7 @@ def configurar_handlers(app_bot):
     app_bot.add_handler(CommandHandler("pagar", pagar_vendas))
     app_bot.add_handler(CallbackQueryHandler(selecionar_debito, pattern="^debito:"))
     app_bot.add_handler(CallbackQueryHandler(marcar_pagamento, pattern="^pagar_(sim|nao)$"))
-    app_bot.add_handler(CallbackQueryHandler(iniciar_pagamento_parcial, pattern="^pagar:")
+    app_bot.add_handler(CallbackQueryHandler(iniciar_pagamento_parcial, pattern="^pagar:"))
     app_bot.add_handler(CallbackQueryHandler(executar_pagamento, pattern="^confirmar_pagamento_(sim|nao)$"))
     app_bot.add_handler(CallbackQueryHandler(confirmar_transacao_prompt, pattern="^confirma_transacao:"))
     app_bot.add_handler(CallbackQueryHandler(confirmar_transacao_exec, pattern="^confirmar_"))

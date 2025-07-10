@@ -322,7 +322,12 @@ async def selecionar_debito(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("❌ Cancelar", callback_data="pagar_nao")
         ]
     ])
-    await send_and_delete(f"Deseja marcar a venda #{venda_id} como paga?", reply_markup=botoes)
+    await send_and_delete(
+        f"Deseja marcar a venda #{venda_id} como paga?",
+        update,
+        context,
+        reply_markup=botoes
+    )
 
 async def marcar_pagamento(update: Update, context: ContextTypes.DEFAULT_TYPE):  
     logger.info("→ Entrando em marcar_pagamento()")

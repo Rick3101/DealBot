@@ -1,3 +1,4 @@
+import random
 import os
 import psycopg2
 from contextlib import closing
@@ -477,3 +478,12 @@ def atualizar_status_pago(venda_id, pago=True):
                 WHERE id = %s
             """, (pago, venda_id))
             conn.commit()
+            
+def obter_frase_start():
+    with get_connection() as conn:
+        with conn.cursor() as c:
+            c.execute("SELECT texto FROM FrasesStart")
+            frases = c.fetchall()
+            if not frases:
+                return "👋 Bem-vindo!"
+            return random.choice(frases)[0]

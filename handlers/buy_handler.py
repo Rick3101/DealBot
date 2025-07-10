@@ -30,7 +30,7 @@ from datetime import datetime
 
 # 🔥 Estados
 BUY_NAME, BUY_SELECT_PRODUCT, BUY_QUANTITY, BUY_PRICE = range(4)
-
+PAGAMENTO_VALOR = range(1)
 
 # 🔘 Teclado com produtos + finalizar compra
 def gerar_keyboard_comprar(nivel):
@@ -270,6 +270,9 @@ def get_buy_conversation_handler():
             BUY_PRICE: [
                 MessageHandler(filters.Regex(r"^\d+(\.\d{1,2})?$"), buy_set_price)
             ],
+            PAGAMENTO_VALOR: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receber_pagamento_parcial)
+            ]
         },
         fallbacks=[
             CommandHandler("cancel", cancel),
@@ -315,8 +318,8 @@ async def selecionar_debito(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     botoes = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ Sim", callback_data="pagar_sim"),
-            InlineKeyboardButton("❌ Não", callback_data="pagar_nao")
+            InlineKeyboardButton("💰 Pagar", callback_data="pagar_sim"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="pagar_nao")
         ]
     ])
     await send_and_delete(f"Deseja marcar a venda #{venda_id} como paga?", reply_markup=botoes)
@@ -326,19 +329,26 @@ async def marcar_pagamento(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
     await query.answer()
+    await delete_protected_message(update, context)
+
     venda_id = context.user_data.get("debito_venda_id")
 
-    await delete_protected_message(update, context)  
-
     if not venda_id:
-        await query.message.reply_text("⚠️ Venda não identificada.")
-        return
+        await send_and_delete("⚠️ Venda não identificada.", update, context)
+        return ConversationHandler.END
 
-    if query.data == "pagar_sim":
-        produto_service.atualizar_status_pago(venda_id, True)
-        await send_and_delete(f"✅ Venda #{venda_id} marcada como paga." ,update, context)
-    else:
-        await send_and_delete("🚫 Operação cancelada." , update, context)
+    context.user_data["venda_a_pagar"] = venda_id
+
+    total = produto_service.valor_total_venda(venda_id)
+    pago = produto_service.valor_pago_venda(venda_id)
+    restante = total - pago
+
+    await send_and_delete(
+        f"💸 Total: R${total:.2f}\nPago: R${pago:.2f}\n🔹 Restante: R${restante:.2f}\n\nDigite o valor a pagar:",
+        update,
+        context
+    )
+    return PAGAMENTO_VALOR
 
 @require_permission("admin")
 async def pagar_vendas(update: Update, context: ContextTypes.DEFAULT_TYPE): 
@@ -460,3 +470,55 @@ async def checar_menu_secreto(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await send_and_delete("❓ Comando não reconhecido. Use os botões para selecionar.", update, context)
     return BUY_SELECT_PRODUCT
+
+async def iniciar_pagamento_parcial(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("→ Entrando em iniciar_pagamento_parcial()")
+
+    query = update.callback_query
+    await query.answer()
+    await delete_protected_message(update, context)
+
+    venda_id = query.data.split(":")[1]
+    context.user_data["venda_a_pagar"] = venda_id
+
+    total = produto_service.valor_total_venda(venda_id)
+    pago = produto_service.valor_pago_venda(venda_id)
+    restante = total - pago
+
+    await send_and_delete(
+        f"💸 Total: R${total:.2f}\nPago: R${pago:.2f}\n🔹 Restante: R${restante:.2f}\n\nDigite o valor a pagar:",
+        update,
+        context
+    )
+    return PAGAMENTO_VALOR
+
+async def receber_pagamento_parcial(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("→ Entrando em receber_pagamento_parcial()")
+
+    texto = update.message.text.replace(",", ".").strip()
+
+    try:
+        valor = float(texto)
+        if valor <= 0:
+            raise ValueError()
+
+    except:
+        await send_and_delete("❌ Valor inválido. Tente novamente com um número válido.", update, context)
+        return PAGAMENTO_VALOR
+
+    venda_id = context.user_data.get("venda_a_pagar")
+    produto_service.registrar_pagamento(venda_id, valor)
+
+    total = produto_service.valor_total_venda(venda_id)
+    pago = produto_service.valor_pago_venda(venda_id)
+
+    if pago >= total:
+        produto_service.atualizar_status_pago(venda_id, True)
+        await send_and_delete(f"✅ Pagamento de R${valor:.2f} registrado.\n💰 Venda quitada!", update, context)
+    else:
+        await send_and_delete(
+            f"✅ Pagamento de R${valor:.2f} registrado.\n💸 Total pago até agora: R${pago:.2f} / R${total:.2f}",
+            update, context
+        )
+
+    return ConversationHandler.END

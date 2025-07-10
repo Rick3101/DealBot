@@ -413,7 +413,7 @@ def listar_vendas_em_aberto(filtro_nome=None):
                 FROM Vendas v
                 JOIN ItensVenda i ON v.id = i.venda_id
                 LEFT JOIN (
-                    SELECT venda_id, SUM(valor) as total_pago
+                    SELECT venda_id, SUM(valor_pago) as total_pago
                     FROM Pagamentos
                     GROUP BY venda_id
                 ) p ON v.id = p.venda_id
@@ -478,7 +478,7 @@ def atualizar_status_pago(venda_id, pago=True):
                 WHERE id = %s
             """, (pago, venda_id))
             conn.commit()
-            
+
 def obter_frase_start():
     with get_connection() as conn:
         with conn.cursor() as c:
@@ -487,3 +487,13 @@ def obter_frase_start():
             if not frases:
                 return "👋 Bem-vindo!"
             return random.choice(frases)[0]
+
+def valor_pago_venda(venda_id):
+    with get_connection() as conn:
+        with conn.cursor() as c:
+            c.execute("""
+                SELECT COALESCE(SUM(valor_pago), 0)
+                FROM Pagamentos
+                WHERE venda_id = %s
+            """, (venda_id,))
+            return c.fetchone()[0]

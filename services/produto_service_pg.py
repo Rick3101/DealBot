@@ -467,3 +467,13 @@ def obter_estoque_detalhado():
                 ORDER BY p.nome
             """)
             return c.fetchall()
+
+def atualizar_status_pago(venda_id, pago=True):
+    with get_connection() as conn:
+        with conn.cursor() as c:
+            c.execute("""
+                UPDATE Vendas
+                SET pago = %s
+                WHERE id = %s
+            """, (pago, venda_id))
+            conn.commit()

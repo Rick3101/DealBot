@@ -46,6 +46,7 @@ from handlers.smartcontract_handler import (
 )
 from handlers.estoque_handler import get_estoque_conversation_handler 
 from handlers.lista_produtos_handler import lista_produtos
+from handlers.commands_handler import commands_handler
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     import traceback
@@ -72,8 +73,10 @@ def configurar_handlers(app_bot):
     app_bot.add_handler(get_smartcontract_conversation_handler())
     app_bot.add_handler(get_buy_conversation_handler()) 
 
+
     from telegram.ext import CommandHandler, CallbackQueryHandler
     app_bot.add_handler(CommandHandler("start", start))
+    app_bot.add_handler(CommandHandler("commands", commands_handler))
     app_bot.add_handler(CommandHandler("protect", protect))
     app_bot.add_handler(CommandHandler("cancel", cancel))
     app_bot.add_handler(CommandHandler("debitos", listar_debitos))

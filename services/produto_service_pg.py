@@ -428,3 +428,10 @@ def listar_vendas_em_aberto(filtro_nome=None):
 
             c.execute(query, tuple(params))
             return c.fetchall()
+
+def obter_username_por_chat_id(chat_id):
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT username FROM Usuarios WHERE chat_id = ?", (chat_id,))
+        row = c.fetchone()
+        return row[0] if row else None

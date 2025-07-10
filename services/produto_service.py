@@ -569,3 +569,10 @@ def atualizar_nivel_usuario(username, novo_nivel):
             (novo_nivel, username)
         )
         conn.commit()
+
+def obter_username_por_chat_id(chat_id):
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT username FROM Usuarios WHERE chat_id = ?", (chat_id,))
+        row = c.fetchone()
+        return row[0] if row else None

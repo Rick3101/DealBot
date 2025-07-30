@@ -7,6 +7,7 @@ from telegram.ext import (
     filters,
 )
 from utils.message_cleaner import send_and_delete, delayed_delete
+from utils.input_sanitizer import InputSanitizer
 import asyncio
 import services.produto_service_pg as produto_service
 
@@ -19,25 +20,39 @@ async def start_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return LOGIN_USERNAME
 
 async def received_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["username_login"] = update.message.text
+    try:
+        username = InputSanitizer.sanitize_username(update.message.text)
+        context.user_data["username_login"] = username
 
-    asyncio.create_task(delayed_delete(update.message, context, delay=10))
-    await send_and_delete("🔒 Agora envie sua senha:", update, context)
-    return LOGIN_PASSWORD
+        asyncio.create_task(delayed_delete(update.message, context, delay=10))
+        await send_and_delete("🔒 Agora envie sua senha:", update, context)
+        return LOGIN_PASSWORD
+        
+    except ValueError as e:
+        asyncio.create_task(delayed_delete(update.message, context, delay=10))
+        await send_and_delete(f"❌ {str(e)}\n\nEnvie um nome de usuário válido:", update, context)
+        return LOGIN_USERNAME
 
 async def received_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = context.user_data.get("username_login")
-    password = update.message.text
     chat_id = update.effective_chat.id
 
-    asyncio.create_task(delayed_delete(update.message, context, delay=10))
+    try:
+        password = InputSanitizer.sanitize_password(update.message.text)
+        
+        asyncio.create_task(delayed_delete(update.message, context, delay=10))
 
-    if produto_service.verificar_login(username, password, chat_id):
-        await send_and_delete("✅ Login realizado com sucesso!", update, context)
-    else:
-        await send_and_delete("❌ Usuário ou senha inválidos.", update, context)
+        if produto_service.verificar_login(username, password, chat_id):
+            await send_and_delete("✅ Login realizado com sucesso!", update, context)
+        else:
+            await send_and_delete("❌ Usuário ou senha inválidos.", update, context)
 
-    return ConversationHandler.END
+        return ConversationHandler.END
+        
+    except ValueError as e:
+        asyncio.create_task(delayed_delete(update.message, context, delay=10))
+        await send_and_delete(f"❌ {str(e)}\n\nEnvie uma senha válida:", update, context)
+        return LOGIN_PASSWORD
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_and_delete("🚫 Login cancelado.", update, context)

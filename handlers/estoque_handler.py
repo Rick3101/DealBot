@@ -20,6 +20,7 @@ from utils.message_cleaner import (
     get_effective_message
 )
 from handlers.global_handlers import cancel, cancel_callback
+from utils.input_sanitizer import InputSanitizer
 import services.produto_service_pg as produto_service
 
 
@@ -141,18 +142,9 @@ async def estoque_receive_values(update: Update, context: ContextTypes.DEFAULT_T
     logger.info("→ Entrando em estoque_receive_values()")
 
     produto_id = context.user_data["estoque_produto_id"]
-    texto = update.message.text
 
     try:
-        partes = [p.strip().replace(",", ".") for p in texto.split("/")]
-
-        if len(partes) != 3:
-            raise ValueError("❌ Formato inválido. Use: quantidade / valor / custo")
-
-        quantidade = int(partes[0])
-        valor = float(partes[1])
-        custo = float(partes[2])
-
+        quantidade, valor, custo = InputSanitizer.sanitize_stock_input(update.message.text)
         produto_service.adicionar_estoque(produto_id, quantidade, valor, custo)
 
         await send_menu_with_delete(

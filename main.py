@@ -21,7 +21,10 @@ import sys
 
 
 # 🔑 Token do Bot
-TOKEN = "7593794682:AAEqzdMTtkzGcJLdI_SGFjRSF50q4ntlIjo"
+import os
+TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise ValueError("BOT_TOKEN environment variable is required")
 
 # 🌍 URL pública gerada pelo ngrok ou domínio
 WEBHOOK_URL = f"https://777b-2804-1b3-a7c0-d599-f9bf-ac44-a52b-8d26.ngrok-free.app/{TOKEN}"

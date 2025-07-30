@@ -3,16 +3,114 @@ import os
 import psycopg2
 from contextlib import closing
 from datetime import datetime
+from database import get_db_manager
 
 # === CONEXÃO COM POSTGRES ===
+# Legacy support - keeping for backward compatibility
 DB_URL = os.getenv("DATABASE_URL")
 
 def get_connection():
+    """Legacy function - use get_db_manager().get_connection() instead"""
     return psycopg2.connect(DB_URL)
+
+def init_db():
+    """Initialize database tables if they don't exist."""
+    db_manager = get_db_manager()
+    
+    create_tables_sql = """
+    -- Create Usuarios table
+    CREATE TABLE IF NOT EXISTS Usuarios (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(50) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        nivel VARCHAR(20) DEFAULT 'user',
+        chat_id BIGINT
+    );
+
+    -- Create Produtos table
+    CREATE TABLE IF NOT EXISTS Produtos (
+        id SERIAL PRIMARY KEY,
+        nome VARCHAR(100) NOT NULL,
+        emoji VARCHAR(10),
+        media_file_id VARCHAR(255)
+    );
+
+    -- Create Vendas table
+    CREATE TABLE IF NOT EXISTS Vendas (
+        id SERIAL PRIMARY KEY,
+        comprador VARCHAR(100) NOT NULL,
+        data TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Create ItensVenda table
+    CREATE TABLE IF NOT EXISTS ItensVenda (
+        id SERIAL PRIMARY KEY,
+        venda_id INTEGER REFERENCES Vendas(id),
+        produto_id INTEGER REFERENCES Produtos(id),
+        quantidade INTEGER NOT NULL,
+        valor_unitario DECIMAL(10,2) NOT NULL
+    );
+
+    -- Create Estoque table
+    CREATE TABLE IF NOT EXISTS Estoque (
+        id SERIAL PRIMARY KEY,
+        produto_id INTEGER REFERENCES Produtos(id),
+        quantidade INTEGER NOT NULL,
+        valor DECIMAL(10,2) NOT NULL,
+        custo DECIMAL(10,2) NOT NULL,
+        data_adicao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Create Pagamentos table
+    CREATE TABLE IF NOT EXISTS Pagamentos (
+        id SERIAL PRIMARY KEY,
+        venda_id INTEGER REFERENCES Vendas(id),
+        valor_pago DECIMAL(10,2) NOT NULL,
+        data_pagamento TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Create SmartContracts table
+    CREATE TABLE IF NOT EXISTS SmartContracts (
+        id SERIAL PRIMARY KEY,
+        chat_id BIGINT NOT NULL,
+        codigo VARCHAR(50) NOT NULL,
+        data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Create TransacoesSmartContract table
+    CREATE TABLE IF NOT EXISTS TransacoesSmartContract (
+        id SERIAL PRIMARY KEY,
+        contrato_id INTEGER REFERENCES SmartContracts(id),
+        descricao TEXT NOT NULL,
+        confirmado BOOLEAN DEFAULT FALSE,
+        data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Create FraseStart table
+    CREATE TABLE IF NOT EXISTS FraseStart (
+        id SERIAL PRIMARY KEY,
+        frase TEXT NOT NULL
+    );
+
+    -- Insert default start phrase if table is empty
+    INSERT INTO FraseStart (frase) 
+    SELECT 'Bot iniciado com sucesso!'
+    WHERE NOT EXISTS (SELECT 1 FROM FraseStart);
+    """
+    
+    with db_manager.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(create_tables_sql)
+            conn.commit()
+    
+    print("SUCCESS: Database tables initialized successfully")
 
 # === USUÁRIOS ===
 def verificar_login(username, password, chat_id):
-    with closing(get_connection()) as conn:
+    """Verify user login and update chat_id if successful."""
+    db_manager = get_db_manager()
+    
+    with db_manager.get_connection() as conn:
         with conn.cursor() as c:
             c.execute("SELECT id FROM Usuarios WHERE username = %s AND password = %s", (username, password))
             row = c.fetchone()
@@ -30,11 +128,14 @@ def verificar_username_existe(username):
             return c.fetchone() is not None
 
 def obter_nivel(chat_id):
-    with closing(get_connection()) as conn:
-        with conn.cursor() as c:
-            c.execute("SELECT nivel FROM Usuarios WHERE chat_id = %s", (chat_id,))
-            row = c.fetchone()
-            return row[0] if row else None
+    """Get user permission level by chat_id."""
+    db_manager = get_db_manager()
+    result = db_manager.execute_query(
+        "SELECT nivel FROM Usuarios WHERE chat_id = %s", 
+        (chat_id,), 
+        fetch='one'
+    )
+    return result[0] if result else None
 
 def listar_usuarios():
     with closing(get_connection()) as conn:
@@ -43,13 +144,12 @@ def listar_usuarios():
             return [row[0] for row in c.fetchall()]
 
 def adicionar_usuario(username, password, nivel="user"):
-    with closing(get_connection()) as conn:
-        with conn.cursor() as c:
-            c.execute(
-                "INSERT INTO Usuarios (username, password, nivel) VALUES (%s, %s, %s)",
-                (username, password, nivel)
-            )
-            conn.commit()
+    """Add a new user to the database."""
+    db_manager = get_db_manager()
+    db_manager.execute_query(
+        "INSERT INTO Usuarios (username, password, nivel) VALUES (%s, %s, %s)",
+        (username, password, nivel)
+    )
 
 def remover_usuario(username):
     with closing(get_connection()) as conn:

@@ -14,6 +14,7 @@ from telegram.ext import (
     filters,
 )
 from utils.message_cleaner import send_and_delete , send_menu_with_delete , delete_protected_message
+from utils.input_sanitizer import InputSanitizer
 from utils.permissions import require_permission
 import services.produto_service_pg as produto_service
 from handlers.global_handlers import cancel_callback , cancel
@@ -105,17 +106,22 @@ async def menu_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def add_username(update: Update, context: ContextTypes.DEFAULT_TYPE):    
     logger.info("→ Entrando em add_username()")
 
-    username = update.message.text.strip()
+    try:
+        username = InputSanitizer.sanitize_username(update.message.text)
 
-    if produto_service.verificar_username_existe(username):
-        await send_and_delete(
-            "❌ Este nome de usuário já existe. Por favor, envie outro nome:",
-            update,
-            context
-        )
-        return ADD_USERNAME  # 🔥 Continua no mesmo estado
+        if produto_service.verificar_username_existe(username):
+            await send_and_delete(
+                "❌ Este nome de usuário já existe. Por favor, envie outro nome:",
+                update,
+                context
+            )
+            return ADD_USERNAME  # 🔥 Continua no mesmo estado
 
-    context.user_data["novo_username"] = username
+        context.user_data["novo_username"] = username
+        
+    except ValueError as e:
+        await send_and_delete(f"❌ {str(e)}\n\nEnvie um nome de usuário válido:", update, context)
+        return ADD_USERNAME
     await send_and_delete("🔑 Agora envie a senha para este usuário:", update, context)
     return ADD_PASSWORD
 
@@ -125,15 +131,21 @@ async def add_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("→ Entrando em add_password()")
 
     username = context.user_data["novo_username"]
-    password = update.message.text
+    
+    try:
+        password = InputSanitizer.sanitize_password(update.message.text)
 
-    if produto_service.verificar_username_existe(username):
-        await send_and_delete("❌ Esse nome de usuário já existe.", update, context)
-    else:
-        produto_service.adicionar_usuario(username, password)
-        await send_and_delete("✅ Usuário adicionado com sucesso!", update, context)
+        if produto_service.verificar_username_existe(username):
+            await send_and_delete("❌ Esse nome de usuário já existe.", update, context)
+        else:
+            produto_service.adicionar_usuario(username, password)
+            await send_and_delete("✅ Usuário adicionado com sucesso!", update, context)
 
-    return ConversationHandler.END
+        return ConversationHandler.END
+        
+    except ValueError as e:
+        await send_and_delete(f"❌ {str(e)}\n\nEnvie uma senha válida:", update, context)
+        return ADD_PASSWORD
 
 @require_permission("owner")
 # ➖ Remover usuário

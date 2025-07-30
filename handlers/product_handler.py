@@ -20,6 +20,7 @@ from utils.message_cleaner import (
     send_menu_with_delete,
     delete_protected_message
 )
+from utils.input_sanitizer import InputSanitizer
 from utils.permissions import require_permission
 import services.produto_service_pg as produto_service
 from handlers.global_handlers import cancel, cancel_callback
@@ -80,17 +81,22 @@ async def product_menu_selection(update: Update, context: ContextTypes.DEFAULT_T
 async def product_add_name(update: Update, context: ContextTypes.DEFAULT_TYPE):    
     logger.info("→ Entrando em product_add_name()")
 
-    nome = update.message.text.strip()
+    try:
+        nome = InputSanitizer.sanitize_product_name(update.message.text)
 
-    if produto_service.verificar_produto_existe(nome):
-        await send_and_delete(
-            "❌ Já existe um produto com esse nome. Por favor, envie outro nome:",
-            update,
-            context
-        )
-        return PRODUCT_ADD_NAME  # 🔥 Fica no mesmo estado esperando nome válido
+        if produto_service.verificar_produto_existe(nome):
+            await send_and_delete(
+                "❌ Já existe um produto com esse nome. Por favor, envie outro nome:",
+                update,
+                context
+            )
+            return PRODUCT_ADD_NAME  # 🔥 Fica no mesmo estado esperando nome válido
 
-    context.user_data["product_name"] = nome
+        context.user_data["product_name"] = nome
+        
+    except ValueError as e:
+        await send_and_delete(f"❌ {str(e)}\n\nEnvie um nome válido:", update, context)
+        return PRODUCT_ADD_NAME
     await send_and_delete("😊 Agora envie o emoji para este produto:", update, context)
     return PRODUCT_ADD_EMOJI
 
@@ -99,7 +105,13 @@ async def product_add_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def product_add_emoji(update: Update, context: ContextTypes.DEFAULT_TYPE):    
     logger.info("→ Entrando em product_add_emoji()")
 
-    context.user_data["product_emoji"] = update.message.text
+    try:
+        emoji = InputSanitizer.sanitize_emoji(update.message.text)
+        context.user_data["product_emoji"] = emoji
+        
+    except ValueError as e:
+        await send_and_delete(f"❌ {str(e)}\n\nEnvie um emoji válido:", update, context)
+        return PRODUCT_ADD_EMOJI
 
     keyboard = InlineKeyboardMarkup([
         [

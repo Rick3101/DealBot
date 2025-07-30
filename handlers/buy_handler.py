@@ -19,6 +19,7 @@ from utils.message_cleaner import (
     delete_protected_message,
     send_and_delete,
 )
+from utils.input_sanitizer import InputSanitizer
 import services.produto_service_pg as produto_service
 from handlers.global_handlers import cancel, cancel_callback
 from utils.permissions import require_permission
@@ -93,17 +94,24 @@ async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def buy_set_name(update: Update, context: ContextTypes.DEFAULT_TYPE):    
     logger.info("→ Entrando em buy_set_name()")
 
-    context.user_data["nome_comprador"] = update.message.text
-    nivel = context.user_data.get("nivel")
-    await send_menu_with_delete(
-        "🛒 Escolha o produto:",
-        update,
-        context,
-        gerar_keyboard_comprar(nivel),
-        delay=10,
-        protected=False
-    )
-    return BUY_SELECT_PRODUCT
+    try:
+        nome_comprador = InputSanitizer.sanitize_buyer_name(update.message.text)
+        context.user_data["nome_comprador"] = nome_comprador
+        
+        nivel = context.user_data.get("nivel")
+        await send_menu_with_delete(
+            "🛒 Escolha o produto:",
+            update,
+            context,
+            gerar_keyboard_comprar(nivel),
+            delay=10,
+            protected=False
+        )
+        return BUY_SELECT_PRODUCT
+        
+    except ValueError as e:
+        await send_and_delete(f"❌ {str(e)}\n\nDigite um nome válido:", update, context)
+        return BUY_NAME
 
 async def buy_select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):  
     logger.info("→ Entrando em buy_select_product()")
@@ -131,17 +139,22 @@ async def buy_select_product(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def buy_set_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):   
     logger.info("→ Entrando em buy_set_quantity()")
 
-    quantidade = int(update.message.text)
-    context.user_data["quantidade_atual"] = quantidade
+    try:
+        quantidade = InputSanitizer.sanitize_quantity(update.message.text)
+        context.user_data["quantidade_atual"] = quantidade
 
-    await send_and_delete(
-        "💰 Qual o preço do lote?",
-        update,
-        context,
-        delay=10,
-        protected=False
-    )
-    return BUY_PRICE
+        await send_and_delete(
+            "💰 Qual o preço do lote?",
+            update,
+            context,
+            delay=10,
+            protected=False
+        )
+        return BUY_PRICE
+        
+    except ValueError as e:
+        await send_and_delete(f"❌ {str(e)}\n\nDigite uma quantidade válida:", update, context)
+        return BUY_QUANTITY
 
 async def buy_set_price(update: Update, context: ContextTypes.DEFAULT_TYPE):  
     logger.info("→ Entrando em buy_set_price()")
@@ -151,7 +164,11 @@ async def buy_set_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         pass
 
-    preco = float(update.message.text)
+    try:
+        preco = InputSanitizer.sanitize_price(update.message.text)
+    except ValueError as e:
+        await send_and_delete(f"❌ {str(e)}\n\nDigite um preço válido:", update, context)
+        return BUY_PRICE
 
     item = {
         "produto_id": context.user_data["produto_atual"],

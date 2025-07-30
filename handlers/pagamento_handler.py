@@ -6,6 +6,7 @@ from telegram.ext import (
     CommandHandler, MessageHandler, filters
 )
 from utils.message_cleaner import send_and_delete, delete_protected_message, send_menu_with_delete
+from utils.input_sanitizer import InputSanitizer
 from services import produto_service_pg as produto_service
 from handlers.global_handlers import cancel, cancel_callback
 from utils.permissions import require_permission
@@ -60,14 +61,11 @@ async def iniciar_pagamento_parcial(update: Update, context: ContextTypes.DEFAUL
 
 async def receber_pagamento_parcial(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("→ Entrando em receber_pagamento_parcial()")
-    texto = update.message.text.replace(",", ".").strip()
 
     try:
-        valor = float(texto)
-        if valor <= 0:
-            raise ValueError()
-    except:
-        await send_and_delete("❌ Valor inválido. Tente novamente com um número válido.", update, context)
+        valor = InputSanitizer.sanitize_price(update.message.text)
+    except ValueError as e:
+        await send_and_delete(f"❌ {str(e)}\n\nDigite um valor válido:", update, context)
         return PAGAMENTO_VALOR
 
     venda_id = context.user_data.get("venda_a_pagar")

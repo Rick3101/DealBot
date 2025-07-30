@@ -8,6 +8,7 @@ from telegram.ext import (
     MessageHandler, CallbackQueryHandler, filters
 )
 from utils.message_cleaner import send_and_delete, delete_protected_message
+from utils.input_sanitizer import InputSanitizer
 from handlers.global_handlers import cancel, cancel_callback
 
 TRANSACTION_MENU, TRANSACTION_DESCRICAO = range(2)
@@ -87,16 +88,17 @@ async def transacao_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def receber_descricao_transacao(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("→ Entrando em receber_descricao_transacao()")
     contrato_id = context.user_data.get("contrato_id")
-    descricao = update.message.text.strip()
-
-    if not descricao:
-        await send_and_delete("❌ Descrição vazia. Tente novamente.", update, context)
+    
+    try:
+        descricao = InputSanitizer.sanitize_description(update.message.text)
+        produto_service.adicionar_transacao_contrato(contrato_id, descricao)
+        logger.info(f"Transação adicionada no contrato {contrato_id}: {descricao}")
+        await send_and_delete("✅ Transação adicionada com sucesso!", update, context)
+        return ConversationHandler.END
+        
+    except ValueError as e:
+        await send_and_delete(f"❌ {str(e)}\n\nEnvie uma descrição válida:", update, context)
         return TRANSACTION_DESCRICAO
-
-    produto_service.adicionar_transacao_contrato(contrato_id, descricao)
-    logger.info(f"Transação adicionada no contrato {contrato_id}: {descricao}")
-    await send_and_delete("✅ Transação adicionada com sucesso!", update, context)
-    return ConversationHandler.END
 
 async def confirmar_transacao_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("→ Entrando em confirmar_transacao_prompt()")

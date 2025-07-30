@@ -1,142 +1,181 @@
 import os
-import asyncio
 import logging
 import nest_asyncio
-import threading
 from flask import Flask, request
 from telegram import Update
-from telegram.ext import Application, ContextTypes
-from telegram.request import HTTPXRequest
-from queue import Queue
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not installed, use system environment variables
+
+# Initialize database connection manager
+from database import initialize_database, get_db_manager
+from core.bot_manager import BotManager
+from core.handler_registry import configure_handlers
 
 # === CONFIGURAÇÃO ===
-TOKEN = os.getenv("BOT_TOKEN") or "7593794682:AAEqzdMTtkzGcJLdI_SGFjRSF50q4ntlIjo"
-RAILWAY_URL = os.getenv("RAILWAY_URL") or "https://dealbot.onrender.com"
+TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise ValueError("BOT_TOKEN environment variable is required")
+RAILWAY_URL = os.getenv("RAILWAY_URL")
+if not RAILWAY_URL:
+    raise ValueError("RAILWAY_URL environment variable is required")
 WEBHOOK_PATH = f"/{TOKEN}"
 WEBHOOK_URL = f"{RAILWAY_URL}{WEBHOOK_PATH}"
 
 # === FLASK INIT ===
 app = Flask(__name__)
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 nest_asyncio.apply()
 
-# === UPDATE QUEUE ===
-update_queue = Queue()
-app_bot = None
+# === DATABASE INIT ===
+try:
+    initialize_database()
+    logger.info("✅ Database connection pool initialized")
+    
+    # Initialize database tables
+    from services import produto_service_pg
+    produto_service_pg.init_db()
+    logger.info("✅ Database tables initialized")
+except Exception as e:
+    logger.error(f"❌ Failed to initialize database: {e}")
+    raise
 
-# === HANDLERS ===
-from handlers.start_handler import start, protect
-from handlers.global_handlers import cancel, cancel_callback
-from handlers.login_handler import login_handler
-from handlers.product_handler import get_product_conversation_handler
-from handlers.relatorios_handler import (
-    get_relatorios_conversation_handler,
-    exportar_csv_handler,
-    exportar_csv_detalhes_handler,
-    fechar_handler,
-)
-from handlers.buy_handler import get_buy_conversation_handler 
-from handlers.user_handler import get_user_conversation_handler
-from handlers.smartcontract_handler import (
-    criar_smart_contract,
-    get_smartcontract_conversation_handler,
-    confirmar_transacao_prompt,
-    confirmar_transacao_exec
-)
-from handlers.estoque_handler import get_estoque_conversation_handler 
-from handlers.lista_produtos_handler import lista_produtos
-from handlers.commands_handler import commands_handler
-from handlers.pagamento_handler import (
-    pagar_vendas,
-    get_pagamento_conversation_handler,
-)
+# === BOT MANAGER INIT ===
+bot_manager = BotManager(TOKEN, WEBHOOK_URL)
+bot_manager.set_handler_configurator(configure_handlers)
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    import traceback
-    logger.error("❌ Exception caught:", exc_info=context.error)
-    tb_list = traceback.format_exception(None, context.error, context.error.__traceback__)
-    tb_string = ''.join(tb_list)
-    print(f"🔴 Traceback:\n{tb_string}")
-    chat_id = update.effective_chat.id if isinstance(update, Update) and update.effective_chat else None
-    if chat_id:
-        try:
-            await context.bot.send_message(chat_id=chat_id, text="⚠️ Ocorreu um erro inesperado.")
-        except:
-            pass
-
-def configurar_handlers(app_bot):
-    app_bot.add_handler(get_user_conversation_handler())
-    app_bot.add_handler(login_handler)
-    app_bot.add_handler(get_product_conversation_handler())
-    app_bot.add_handler(get_estoque_conversation_handler()) 
-    app_bot.add_handler(get_relatorios_conversation_handler())
-    app_bot.add_handler(exportar_csv_handler)
-    app_bot.add_handler(exportar_csv_detalhes_handler)
-    app_bot.add_handler(fechar_handler)
-    app_bot.add_handler(get_smartcontract_conversation_handler())
-    app_bot.add_handler(get_buy_conversation_handler()) 
-    app_bot.add_handler(get_pagamento_conversation_handler())
-
-    from telegram.ext import CommandHandler, CallbackQueryHandler
-    app_bot.add_handler(CommandHandler("start", start))
-    app_bot.add_handler(CommandHandler("commands", commands_handler))
-    app_bot.add_handler(CommandHandler("protect", protect))
-    app_bot.add_handler(CommandHandler("cancel", cancel))
-    app_bot.add_handler(CommandHandler("pagar", pagar_vendas))
-    app_bot.add_handler(CallbackQueryHandler(confirmar_transacao_prompt, pattern="^confirma_transacao:"))
-    app_bot.add_handler(CallbackQueryHandler(confirmar_transacao_exec, pattern="^confirmar_"))
-    app_bot.add_handler(CommandHandler("lista_produtos", lista_produtos))
-    app_bot.add_handler(CommandHandler("smartcontract", criar_smart_contract))
-
-
-# === WORKER QUE PROCESSA A FILA DE UPDATES ===
-def start_update_worker():
-    global app_bot
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    async def worker():
-        global app_bot
-
-        request_conf = HTTPXRequest(connect_timeout=10, read_timeout=10, write_timeout=10)
-        app_bot = Application.builder().token(TOKEN).request(request_conf).build()
-
-        configurar_handlers(app_bot)
-        await app_bot.initialize()
-        await app_bot.bot.set_webhook(url=WEBHOOK_URL)
-        await app_bot.start()
-        logger.info("✅ Webhook registrado e bot pronto para processar mensagens.")
-
-        while True:
-            update = await loop.run_in_executor(None, update_queue.get)
-            try:
-                await app_bot.process_update(update)
-            except Exception as e:
-                logger.error(f"[worker] erro ao processar update: {e}", exc_info=True)
-
-    loop.run_until_complete(worker())
-
+# === FLASK LIFECYCLE ===
 @app.before_first_request
 def activate_bot():
+    """Initialize bot on first Flask request."""
     if not hasattr(app, "bot_started"):
         app.bot_started = True
-        threading.Thread(target=start_update_worker, daemon=True).start()
+        bot_manager.start_worker()
+        logger.info("✅ Bot activation completed")
 
 # === FLASK ROUTES ===
 @app.route(WEBHOOK_PATH, methods=["POST"])
 def webhook():
-    global app_bot
-    if app_bot is None or app_bot.bot is None:
-        return "BOT NOT READY", 503
+    """Handle incoming telegram webhooks."""
+    try:
+        if not bot_manager.is_ready:
+            logger.warning("⚠️ Bot not ready, rejecting webhook")
+            return "BOT NOT READY", 503
 
-    update = Update.de_json(request.get_json(force=True), app_bot.bot)
-    update_queue.put(update)
-    return "OK", 200
+        # Parse telegram update
+        update_data = request.get_json(force=True)
+        if not update_data:
+            return "NO DATA", 400
+            
+        update = Update.de_json(update_data, bot_manager.app_bot.bot)
+        
+        # Queue update for processing
+        if bot_manager.queue_update(update):
+            return "OK", 200
+        else:
+            return "QUEUE FULL", 503
+            
+    except Exception as e:
+        logger.error(f"❌ Webhook error: {e}", exc_info=True)
+        return "ERROR", 500
 
 @app.route("/")
 def health():
+    """Simple health check."""
     return "✅ Bot online (health check)", 200
 
+@app.route("/health")
+def health_detailed():
+    """Detailed health check with full system status."""
+    try:
+        # Database health
+        db_manager = get_db_manager()
+        db_healthy = db_manager.health_check()
+        pool_status = db_manager.get_pool_status()
+        
+        # Bot health
+        bot_status = bot_manager.get_health_status()
+        
+        # Overall status
+        overall_healthy = db_healthy and bot_status["bot_ready"]
+        
+        status = {
+            "status": "healthy" if overall_healthy else "degraded",
+            "timestamp": "2025-01-30T00:00:00Z",  # You could use datetime.utcnow().isoformat()
+            "database": {
+                "healthy": db_healthy,
+                "pool": pool_status
+            },
+            "bot": bot_status,
+            "version": os.getenv("RENDER_GIT_COMMIT", "unknown")[:8] if os.getenv("RENDER_GIT_COMMIT") else "local"
+        }
+        
+        return status, 200 if overall_healthy else 503
+        
+    except Exception as e:
+        logger.error(f"❌ Health check failed: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": "2025-01-30T00:00:00Z"
+        }, 503
+
+def cleanup_on_exit():
+    """Clean shutdown for both bot and database."""
+    logger.info("🔄 Performing cleanup on exit...")
+    
+    try:
+        # Shutdown bot manager
+        import asyncio
+        if bot_manager.app_bot:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(bot_manager.shutdown())
+    except Exception as e:
+        logger.error(f"❌ Bot shutdown error: {e}")
+    
+    try:
+        # Close database connections
+        from database import close_database
+        close_database()
+        logger.info("✅ Database connections closed")
+    except Exception as e:
+        logger.error(f"❌ Database shutdown error: {e}")
+
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    import atexit
+    import signal
+    
+    # Register cleanup functions
+    atexit.register(cleanup_on_exit)
+    
+    # Handle termination signals (important for Render)
+    def signal_handler(signum, frame):
+        logger.info(f"🔄 Received signal {signum}, shutting down gracefully...")
+        cleanup_on_exit()
+        exit(0)
+    
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    try:
+        port = int(os.environ.get("PORT", 5000))
+        logger.info(f"🚀 Starting Flask app on port {port}")
+        app.run(host="0.0.0.0", port=port, debug=False)
+        
+    except KeyboardInterrupt:
+        logger.info("🔄 Keyboard interrupt received")
+        cleanup_on_exit()
+    except Exception as e:
+        logger.error(f"❌ Application error: {e}", exc_info=True)
+        cleanup_on_exit()
+        raise

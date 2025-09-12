@@ -1,10 +1,4 @@
-import logging
-logger = logging.getLogger(__name__)
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ContextTypes,
     ConversationHandler,
@@ -13,284 +7,357 @@ from telegram.ext import (
     CallbackQueryHandler,
     filters,
 )
-from telegram.constants import ParseMode
-from utils.message_cleaner import (
-    send_menu_with_delete,
-    delete_protected_message,
-    send_and_delete,
-)
+from handlers.base_handler import MenuHandlerBase, HandlerRequest, HandlerResponse, InteractionType, ContentType
+from handlers.error_handler import with_error_boundary
+from models.handler_models import PurchaseRequest, ProductSelectionRequest
+from services.handler_business_service import HandlerBusinessService
+from core.modern_service_container import get_context, get_user_service, get_product_service
+from core.config import get_config
 from utils.input_sanitizer import InputSanitizer
-import services.produto_service_pg as produto_service
-from handlers.global_handlers import cancel, cancel_callback
 from utils.permissions import require_permission
-from datetime import datetime
+from utils.product_list_generator import create_product_keyboard
+from services.base_service import ValidationError
 
+
+# States
 BUY_NAME, BUY_SELECT_PRODUCT, BUY_QUANTITY, BUY_PRICE = range(4)
 
-# 🔘 Teclado com produtos + finalizar compra
-def gerar_keyboard_comprar(nivel):
-    produtos = produto_service.listar_produtos_com_estoque()
-    keyboard = []
 
-    for pid, nome, emoji, quantidade in produtos:
-        if emoji in {"🧪", "💀"}:
-            continue  # ⛔️ Pula itens secretos
-
-        if nivel == "owner":
-            display_text = f"{emoji} {nome} — {quantidade} unidades"
+class ModernBuyHandler(MenuHandlerBase):
+    def __init__(self):
+        super().__init__("buy")
+        self.secret_phrase = get_config().services.secret_menu_phrase
+    
+    def create_main_menu_keyboard(self) -> InlineKeyboardMarkup:
+        # This handler doesn't use a traditional main menu
+        return None
+    
+    def get_menu_text(self) -> str:
+        return "🛒 Escolha o produto:"
+    
+    def get_menu_state(self) -> int:
+        return BUY_SELECT_PRODUCT
+    
+    def create_products_keyboard(self, request: HandlerRequest, include_secret: bool = False) -> InlineKeyboardMarkup:
+        """Create keyboard with available products using the utility method."""
+        user_level = request.user_data.get("nivel", "user")
+        business_service = self.ensure_services_initialized()
+        
+        return create_product_keyboard(
+            business_service=business_service,
+            user_level=user_level,
+            include_secret=include_secret,
+            callback_prefix="buyproduct",
+            include_actions=True
+        )
+    
+    async def handle_menu_selection(self, request: HandlerRequest, selection: str) -> HandlerResponse:
+        """Handle product selection or finalize purchase."""
+        if selection == "buy_finalizar":
+            return await self.finalize_purchase(request)
+        elif selection == "buy_cancelar":
+            return self.create_smart_response(
+                message="❌ Compra cancelada.",
+                keyboard=None,
+                interaction_type=InteractionType.CONFIRMATION,
+                content_type=ContentType.INFO,
+                end_conversation=True
+            )
+        elif selection.startswith("buyproduct:"):
+            product_id = int(selection.split(":")[1])
+            request.user_data["produto_atual"] = product_id
+            
+            return self.create_smart_response(
+                message="✍️ Quantidade desse produto:",
+                keyboard=None,
+                interaction_type=InteractionType.FORM_INPUT,
+                content_type=ContentType.INFO,
+                next_state=BUY_QUANTITY
+            )
         else:
-            display_text = f"{emoji} {nome}"
-
-        keyboard.append([InlineKeyboardButton(display_text, callback_data=f"buyproduct:{pid}")])
-
-    keyboard.append([
-        InlineKeyboardButton("✅ Finalizar Compra", callback_data="buy_finalizar"),
-        InlineKeyboardButton("❌ Cancelar", callback_data="buy_cancelar")
-    ])
-    return InlineKeyboardMarkup(keyboard)
-
-@require_permission("admin")
-async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):    
-    logger.info("→ Entrando em start_buy()")
-
-    context.user_data.clear()
-    context.chat_data.clear()
-    context.user_data["itens_venda"] = []
-
-    chat_id = update.effective_chat.id
-    nivel = produto_service.obter_nivel(chat_id)
-    context.user_data["nivel"] = nivel
-
-    if nivel == "owner":
-        await send_and_delete(
-            "📟 Qual o nome do comprador?",
-            update,
-            context,
-            delay=10,
-            protected=False
-        )
-        return BUY_NAME
-
-    elif nivel == "admin":
-        nome = produto_service.obter_username_por_chat_id(chat_id)
-        context.user_data["nome_comprador"] = nome
-
-        logger.info(f"🤪 chat_id={chat_id} → nome={nome}")
-
-        await send_menu_with_delete(
-            f"🛒 Compra registrada em nome de: *{nome}*\nEscolha o produto:",
-            update,
-            context,
-            gerar_keyboard_comprar(nivel),
-            delay=10,
-            protected=False
-        )
-        return BUY_SELECT_PRODUCT
-
-    else:
-        await send_and_delete("⛔ Permissão insuficiente para realizar compras.", update, context)
-        return ConversationHandler.END
-
-async def buy_set_name(update: Update, context: ContextTypes.DEFAULT_TYPE):    
-    logger.info("→ Entrando em buy_set_name()")
-
-    try:
-        nome_comprador = InputSanitizer.sanitize_buyer_name(update.message.text)
-        context.user_data["nome_comprador"] = nome_comprador
+            return self.create_smart_response(
+                message="❌ Opção inválida.",
+                keyboard=self.create_products_keyboard(request, include_secret=False),
+                interaction_type=InteractionType.ERROR_DISPLAY,
+                content_type=ContentType.VALIDATION_ERROR,
+                next_state=BUY_SELECT_PRODUCT
+            )
+    
+    async def handle(self, request: HandlerRequest) -> HandlerResponse:
+        """Handle initial buy command - determine user level and flow."""
+        # Clear previous data
+        request.user_data.clear()
+        request.context.chat_data.clear()
+        request.user_data["itens_venda"] = []
         
-        nivel = context.user_data.get("nivel")
-        await send_menu_with_delete(
-            "🛒 Escolha o produto:",
-            update,
-            context,
-            gerar_keyboard_comprar(nivel),
-            delay=10,
-            protected=False
-        )
-        return BUY_SELECT_PRODUCT
+        # Get user information
+        user_service = get_user_service(request.context)
+        user = user_service.get_user_by_chat_id(request.chat_id)
         
-    except ValueError as e:
-        await send_and_delete(f"❌ {str(e)}\n\nDigite um nome válido:", update, context)
-        return BUY_NAME
-
-async def buy_select_product(update: Update, context: ContextTypes.DEFAULT_TYPE):  
-    logger.info("→ Entrando em buy_select_product()")
-
-    query = update.callback_query
-    await query.answer()
-
-    await delete_protected_message(update, context)
-
-    if query.data == "buy_finalizar":
-        return await finalizar_compra(update, context)
-
-    produto_id = query.data.split(":")[1]
-    context.user_data["produto_atual"] = produto_id
-
-    await send_and_delete(
-        "✍️ Quantidade desse produto:",
-        update,
-        context,
-        delay=10,
-        protected=False
-    )
-    return BUY_QUANTITY
-
-async def buy_set_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):   
-    logger.info("→ Entrando em buy_set_quantity()")
-
-    try:
-        quantidade = InputSanitizer.sanitize_quantity(update.message.text)
-        context.user_data["quantidade_atual"] = quantidade
-
-        await send_and_delete(
-            "💰 Qual o preço do lote?",
-            update,
-            context,
-            delay=10,
-            protected=False
-        )
-        return BUY_PRICE
+        if not user:
+            return self.create_smart_response(
+                message="❌ Usuário não encontrado. Execute /login primeiro.",
+                keyboard=None,
+                interaction_type=InteractionType.ERROR_DISPLAY,
+                content_type=ContentType.ERROR,
+                end_conversation=True
+            )
         
-    except ValueError as e:
-        await send_and_delete(f"❌ {str(e)}\n\nDigite uma quantidade válida:", update, context)
-        return BUY_QUANTITY
-
-async def buy_set_price(update: Update, context: ContextTypes.DEFAULT_TYPE):  
-    logger.info("→ Entrando em buy_set_price()")
-
-    try:
-        await update.message.delete()
-    except:
-        pass
-
-    try:
-        preco = InputSanitizer.sanitize_price(update.message.text)
-    except ValueError as e:
-        await send_and_delete(f"❌ {str(e)}\n\nDigite um preço válido:", update, context)
-        return BUY_PRICE
-
-    item = {
-        "produto_id": context.user_data["produto_atual"],
-        "quantidade": context.user_data["quantidade_atual"],
-        "preco": preco
-    }
-
-    context.user_data["itens_venda"].append(item)
-
-    nivel = context.user_data.get("nivel")
-    await send_menu_with_delete(
-        "🛒 Produto adicionado! Escolha outro ou finalize a compra.",
-        update,
-        context,
-        gerar_keyboard_comprar(nivel)
-    )
-
-    return BUY_SELECT_PRODUCT
-
-async def finalizar_compra(update: Update, context: ContextTypes.DEFAULT_TYPE):  
-    logger.info("→ Entrando em finalizar_compra()")
-
-    query = update.callback_query
-    await query.answer()
-
-    await delete_protected_message(update, context)
-
-    nome = context.user_data.get("nome_comprador")
-    itens = context.user_data.get("itens_venda", [])
-
-    if not itens:
-        await send_and_delete("❌ Nenhum item adicionado na compra.", update, context)
-        return ConversationHandler.END
-
-    dados = [(int(i["produto_id"]), int(i["quantidade"]), float(i["preco"])) for i in itens]
-
-    valido, problema_id, disponivel = produto_service.validar_estoque_suficiente(dados)
-
-    if not valido:
-        nome_prod = produto_service.obter_nome_produto(problema_id)
-        await send_and_delete(
-            f"❌ Estoque insuficiente para *{nome_prod}*\nDisponível: {disponivel}",
-            update,
-            context,
-            delay=10,
-            protected=False
+        request.user_data["nivel"] = user.level.value
+        
+        if user.level.value == "owner":
+            return self.create_smart_response(
+                message="📟 Qual o nome do comprador?",
+                keyboard=None,
+                interaction_type=InteractionType.FORM_INPUT,
+                content_type=ContentType.INFO,
+                next_state=BUY_NAME
+            )
+        elif user.level.value == "admin":
+            request.user_data["nome_comprador"] = user.username
+            
+            return self.create_smart_response(
+                message=f"🛒 Compra registrada em nome de: *{user.username}*\nEscolha o produto:",
+                keyboard=self.create_products_keyboard(request, include_secret=False),
+                interaction_type=InteractionType.MENU_NAVIGATION,
+                content_type=ContentType.SELECTION,
+                next_state=BUY_SELECT_PRODUCT
+            )
+        else:
+            return self.create_smart_response(
+                message="⛔ Permissão insuficiente para realizar compras.",
+                keyboard=None,
+                interaction_type=InteractionType.ERROR_DISPLAY,
+                content_type=ContentType.ERROR,
+                end_conversation=True
+            )
+    
+    async def handle_buyer_name(self, request: HandlerRequest) -> HandlerResponse:
+        """Handle buyer name input (owner only)."""
+        try:
+            buyer_name = InputSanitizer.sanitize_buyer_name(request.update.message.text)
+            request.user_data["nome_comprador"] = buyer_name
+            
+            return HandlerResponse(
+                message="🛒 Escolha o produto:",
+                keyboard=self.create_products_keyboard(request, include_secret=False),
+                next_state=BUY_SELECT_PRODUCT,
+                edit_message=True
+            )
+            
+        except ValueError as e:
+            return HandlerResponse(
+                message=f"❌ {str(e)}\n\nDigite um nome válido:",
+                next_state=BUY_NAME,
+                edit_message=True
+            )
+    
+    async def handle_quantity(self, request: HandlerRequest) -> HandlerResponse:
+        """Handle quantity input."""
+        try:
+            quantity = InputSanitizer.sanitize_quantity(request.update.message.text)
+            request.user_data["quantidade_atual"] = quantity
+            
+            return HandlerResponse(
+                message="💰 Qual o preço da unidade?",
+                next_state=BUY_PRICE,
+                edit_message=True
+            )
+            
+        except ValueError as e:
+            return HandlerResponse(
+                message=f"❌ {str(e)}\n\nDigite uma quantidade válida:",
+                next_state=BUY_QUANTITY,
+                edit_message=True
+            )
+    
+    async def handle_price(self, request: HandlerRequest) -> HandlerResponse:
+        """Handle price input and add item to cart."""
+        try:
+            # Delete the price message for privacy using safe deletion
+            await self.batch_cleanup_messages([request.update.message], strategy="instant")
+            
+            price = InputSanitizer.sanitize_price(request.update.message.text)
+            
+            # Add item to cart
+            item = {
+                "produto_id": request.user_data["produto_atual"],
+                "quantidade": request.user_data["quantidade_atual"],
+                "preco": price
+            }
+            
+            request.user_data["itens_venda"].append(item)
+            
+            return HandlerResponse(
+                message="🛒 Produto adicionado! Escolha outro ou finalize a compra.",
+                keyboard=self.create_products_keyboard(request, include_secret=False),
+                next_state=BUY_SELECT_PRODUCT,
+                edit_message=True
+            )
+            
+        except ValueError as e:
+            return HandlerResponse(
+                message=f"❌ {str(e)}\n\nDigite um preço válido:",
+                next_state=BUY_PRICE,
+                edit_message=True
+            )
+    
+    async def handle_secret_menu_check(self, request: HandlerRequest) -> HandlerResponse:
+        """Handle secret menu activation."""
+        text = request.update.message.text.strip()
+        
+        if text.lower() == self.secret_phrase:
+            # Show secret products
+            return HandlerResponse(
+                message="🤪 Itens secretos desbloqueados! Escolha um:",
+                keyboard=self.create_products_keyboard(request, include_secret=True),
+                next_state=BUY_SELECT_PRODUCT,
+                edit_message=True
+            )
+        else:
+            return HandlerResponse(
+                message="❓ Comando não reconhecido. Use os botões para selecionar.",
+                next_state=BUY_SELECT_PRODUCT,
+                edit_message=True
+            )
+    
+    async def finalize_purchase(self, request: HandlerRequest) -> HandlerResponse:
+        """Finalize the purchase using business service."""
+        buyer_name = request.user_data.get("nome_comprador")
+        items = request.user_data.get("itens_venda", [])
+        
+        if not items:
+            return HandlerResponse(
+                message="❌ Nenhum item adicionado na compra.",
+                end_conversation=True
+            )
+        
+        # Convert items to purchase request format
+        purchase_items = []
+        total_amount = 0
+        
+        for item in items:
+            product_id = int(item["produto_id"])
+            quantity = int(item["quantidade"])
+            price = float(item["preco"])
+            
+            purchase_items.append(ProductSelectionRequest(
+                product_id=product_id,
+                quantity=quantity,
+                custom_price=price
+            ))
+            
+            total_amount += price
+        
+        # Create purchase request
+        purchase_request = PurchaseRequest(
+            buyer_name=buyer_name,
+            items=purchase_items,
+            total_amount=total_amount,
+            chat_id=request.chat_id
         )
-        return ConversationHandler.END
-
-    venda_id = produto_service.registrar_venda(nome, datetime.now(), pago=False)
-
-    for produto_id, quantidade, preco in dados:
-        produto_service.registrar_item_venda(venda_id, produto_id, quantidade, preco)
-        produto_service.consumir_estoque_fifo(produto_id, quantidade)
-
-    context.user_data.pop("modo_secreto", None)
-    await send_and_delete("✅ Compra finalizada e estoque atualizado!", update, context)
-    return ConversationHandler.END
-
-async def checar_menu_secreto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    texto = update.message.text.strip()
-    logger.info(f"🤪 Recebido no BUY_SELECT_PRODUCT: {texto}")
-
-    if texto.lower() == "wubba lubba dub dub":
-        nivel = context.user_data.get("nivel")
-
-        produtos_secretos = [
-            (pid, nome, emoji, qtd)
-            for pid, nome, emoji, qtd in produto_service.listar_produtos_com_estoque()
-            if emoji in {"🧪", "💀"}
-        ]
-
-        if not produtos_secretos:
-            await send_and_delete("🧙‍♂️ Nenhum item secreto disponível.", update, context)
-            return BUY_SELECT_PRODUCT
-
-        teclado = [
-            [InlineKeyboardButton(f"{emoji} {nome}", callback_data=f"buyproduct:{pid}")]
-            for pid, nome, emoji, qtd in produtos_secretos
-        ]
-
-        teclado.append([
-            InlineKeyboardButton("✅ Finalizar Compra", callback_data="buy_finalizar"),
-            InlineKeyboardButton("❌ Cancelar", callback_data="buy_cancelar")
-        ])
-
-        await send_menu_with_delete(
-            "🤪 Itens secretos desbloqueados! Escolha um:",
-            update,
-            context,
-            InlineKeyboardMarkup(teclado),
-            delay=10,
-            protected=False
+        
+        # Process purchase through business service
+        business_service = self.ensure_services_initialized()
+        response = business_service.process_purchase(purchase_request)
+        
+        if response.success:
+            return HandlerResponse(
+                message="✅ Compra finalizada e estoque atualizado!",
+                end_conversation=True
+            )
+        else:
+            error_message = response.message
+            if response.warnings:
+                error_message += "\n\n" + "\n".join(response.warnings)
+            
+            return HandlerResponse(
+                message=error_message,
+                end_conversation=True
+            )
+    
+    # Wrapper methods for conversation handler
+    @with_error_boundary("buy_start")
+    @require_permission("admin")
+    async def start_buy(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        return await self.safe_handle(self.handle, update, context)
+    
+    @with_error_boundary("buy_name")
+    async def buy_set_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        request = self.create_request(update, context)
+        response = await self.handle_buyer_name(request)
+        return await self.send_response(response, request)
+    
+    @with_error_boundary("buy_select")
+    async def buy_select_product(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        
+        # Delete protected message
+        # Use safe deletion method
+        await self.batch_cleanup_messages([query], strategy="instant")
+        
+        request = self.create_request(update, context)
+        response = await self.handle_menu_selection(request, query.data)
+        return await self.send_response(response, request)
+    
+    @with_error_boundary("buy_quantity")
+    async def buy_set_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        request = self.create_request(update, context)
+        response = await self.handle_quantity(request)
+        return await self.send_response(response, request)
+    
+    @with_error_boundary("buy_price")
+    async def buy_set_price(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        request = self.create_request(update, context)
+        response = await self.handle_price(request)
+        return await self.send_response(response, request)
+    
+    @with_error_boundary("buy_secret")
+    async def check_secret_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        request = self.create_request(update, context)
+        response = await self.handle_secret_menu_check(request)
+        return await self.send_response(response, request)
+    
+    @with_error_boundary("buy_cancel")
+    async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        request = self.create_request(update, context)
+        response = HandlerResponse(
+            message="🚫 Compra cancelada.",
+            end_conversation=True
         )
-        return BUY_SELECT_PRODUCT
+        return await self.send_response(response, request)
+    
+    def get_conversation_handler(self) -> ConversationHandler:
+        """Create the conversation handler."""
+        return ConversationHandler(
+            entry_points=[CommandHandler("buy", self.start_buy)],
+            states={
+                BUY_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.buy_set_name)
+                ],
+                BUY_SELECT_PRODUCT: [
+                    CallbackQueryHandler(self.buy_select_product, pattern="^buyproduct:"),
+                    CallbackQueryHandler(self.buy_select_product, pattern="^buy_finalizar$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.check_secret_menu),
+                ],
+                BUY_QUANTITY: [
+                    MessageHandler(filters.Regex(r"^\d+$"), self.buy_set_quantity)
+                ],
+                BUY_PRICE: [
+                    MessageHandler(filters.Regex(r"^\d+(\.\d{1,2})?$"), self.buy_set_price)
+                ],
+            },
+            fallbacks=[
+                CommandHandler("cancel", self.cancel),
+                CallbackQueryHandler(self.cancel, pattern="^buy_cancelar$")
+            ],
+            allow_reentry=True
+        )
 
-    await send_and_delete("❓ Comando não reconhecido. Use os botões para selecionar.", update, context)
-    return BUY_SELECT_PRODUCT
 
-
-def get_buy_conversation_handler():
-    return ConversationHandler(
-        entry_points=[CommandHandler("buy", start_buy)],
-        states={
-            BUY_NAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, buy_set_name)
-            ],
-            BUY_SELECT_PRODUCT: [
-                CallbackQueryHandler(buy_select_product, pattern="^buyproduct:"),
-                CallbackQueryHandler(finalizar_compra, pattern="^buy_finalizar$"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, checar_menu_secreto),
-            ],
-            BUY_QUANTITY: [
-                MessageHandler(filters.Regex(r"^\d+$"), buy_set_quantity)
-            ],
-            BUY_PRICE: [
-                MessageHandler(filters.Regex(r"^\d+(\.\d{1,2})?$"), buy_set_price)
-            ],
-        },
-        fallbacks=[
-            CommandHandler("cancel", cancel),
-            CallbackQueryHandler(cancel_callback, pattern="^buy_cancelar$")
-        ],
-        allow_reentry=True
-    )
+# Factory function
+def get_modern_buy_handler():
+    """Get the modern buy conversation handler."""
+    handler = ModernBuyHandler()
+    return handler.get_conversation_handler()

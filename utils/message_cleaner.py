@@ -9,6 +9,9 @@ def get_effective_message(update):
 
 
 async def delayed_delete(message, context, delay=10, protected_messages=None):
+    # Handle None delay gracefully
+    if delay is None or delay <= 0:
+        delay = 10
     await asyncio.sleep(delay)
     protected_messages = protected_messages or context.chat_data.get("protected_messages", set())
     if message.message_id in protected_messages:
@@ -32,11 +35,13 @@ def get_event_loop_safe():
 
 
 async def send_and_delete(
-    text, update, context, delay=10, protected=False, **kwargs
+    text, update, context, delay=10, protected=False, parse_mode=None, **kwargs
 ):
     msg_obj = get_effective_message(update)
 
     if msg_obj:
+        if parse_mode:
+            kwargs['parse_mode'] = parse_mode
         msg = await msg_obj.reply_text(text, **kwargs)
 
         if protected:
@@ -46,14 +51,15 @@ async def send_and_delete(
         else:
             protected_copy = None
 
-        context.application.create_task(delayed_delete(msg, context, delay, protected_copy))
-        context.application.create_task(delayed_delete(msg_obj, context, delay, protected_copy))
+        # Use asyncio to create tasks for delayed deletion
+        asyncio.create_task(delayed_delete(msg, context, delay, protected_copy))
+        asyncio.create_task(delayed_delete(msg_obj, context, delay, protected_copy))
 
         return msg
     return None
 
 async def send_menu_with_delete(
-    text, update, context, keyboard, delay=10, protected=True
+    text, update, context, keyboard, delay=10, protected=True, parse_mode=None
 ):
     """
     Envia uma mensagem com InlineKeyboard (botões) e deleta ela e a anterior após o delay.
@@ -61,10 +67,13 @@ async def send_menu_with_delete(
     msg_obj = get_effective_message(update)
 
     if msg_obj:
-        msg = await msg_obj.reply_text(
-            text,
-            reply_markup=keyboard
-        )
+        kwargs = {
+            'reply_markup': keyboard
+        }
+        if parse_mode:
+            kwargs['parse_mode'] = parse_mode
+        
+        msg = await msg_obj.reply_text(text, **kwargs)
 
         if protected:
             context.chat_data.setdefault("protected_messages", set()).add(msg.message_id)
@@ -118,4 +127,4 @@ async def enviar_documento_temporario(context, chat_id, document_bytes, filename
         except Exception:
             pass
 
-    context.application.create_task(deletar())
+    asyncio.create_task(deletar())

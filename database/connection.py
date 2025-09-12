@@ -4,6 +4,7 @@ import psycopg2
 import psycopg2.pool
 from contextlib import contextmanager
 from typing import Optional
+from urllib.parse import urlparse, quote_plus, urlunparse
 
 logger = logging.getLogger(__name__)
 
@@ -31,18 +32,55 @@ class DatabaseManager:
     def _initialize_pool(self):
         """Initialize the connection pool."""
         try:
+            # Parse URL into connection parameters to avoid encoding issues
+            conn_params = self._parse_database_url(self.database_url)
+            
             self.pool = psycopg2.pool.ThreadedConnectionPool(
                 self.min_connections,
                 self.max_connections,
-                self.database_url,
                 # Connection parameters for better reliability
                 connect_timeout=10,
-                application_name="telegram_bot"
+                application_name="telegram_bot",
+                **conn_params
             )
             logger.info(f"Database pool initialized: {self.min_connections}-{self.max_connections} connections")
         except Exception as e:
             logger.error(f"Failed to initialize database pool: {e}")
             raise
+    
+    def _parse_database_url(self, url: str) -> dict:
+        """
+        Parse database URL into connection parameters.
+        
+        Args:
+            url: Database URL
+            
+        Returns:
+            Dictionary of connection parameters
+        """
+        try:
+            # Parse the URL
+            parsed = urlparse(url)
+            
+            # Extract connection parameters
+            conn_params = {
+                'host': parsed.hostname,
+                'port': parsed.port or 5432,
+                'database': parsed.path.lstrip('/') if parsed.path else None,
+                'user': parsed.username,
+                'password': parsed.password
+            }
+            
+            # Remove None values
+            conn_params = {k: v for k, v in conn_params.items() if v is not None}
+            
+            logger.debug(f"Parsed database connection parameters for host: {conn_params.get('host', 'unknown')}")
+            return conn_params
+            
+        except Exception as e:
+            logger.error(f"Failed to parse database URL: {e}")
+            # Fallback to using the URL string directly
+            return {'dsn': url}
     
     @contextmanager
     def get_connection(self):

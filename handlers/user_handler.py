@@ -1,10 +1,4 @@
-import logging
-logger = logging.getLogger(__name__)
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ContextTypes,
     ConversationHandler,
@@ -13,304 +7,501 @@ from telegram.ext import (
     CallbackQueryHandler,
     filters,
 )
-from utils.message_cleaner import send_and_delete , send_menu_with_delete , delete_protected_message
+from handlers.base_handler import MenuHandlerBase, HandlerRequest, HandlerResponse, InteractionType, ContentType
+from handlers.error_handler import with_error_boundary
+from models.handler_models import UserManagementRequest, UserManagementResponse
+from models.user import UserLevel
+from services.handler_business_service import HandlerBusinessService
+from core.modern_service_container import get_context, get_user_service
 from utils.input_sanitizer import InputSanitizer
 from utils.permissions import require_permission
-import services.produto_service_pg as produto_service
-from handlers.global_handlers import cancel_callback , cancel
-
-# 🔢 Estados da conversa
-MENU, ADD_USERNAME, ADD_PASSWORD, REMOVE_USER, EDIT_SELECT_USER, EDIT_ACTION, EDIT_NEW_VALUE = range(7)
+from services.base_service import ValidationError
 
 
-
-# 🔘 Teclado com botões
-def main_menu_keyboard():
-    keyboard = [
-        [
-            InlineKeyboardButton("➕ Adicionar", callback_data="add_user"),
-            InlineKeyboardButton("➖ Remover", callback_data="remove_user"),
-        ],
-        [
-            InlineKeyboardButton("✏️ Editar", callback_data="edit_user"),
-        ],
-        [   
-        InlineKeyboardButton("🚫 Cancelar", callback_data="cancelar"),
-        ],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+# States
+(USER_MENU, USER_ADD_USERNAME, USER_ADD_PASSWORD, 
+ USER_REMOVE_SELECT, USER_EDIT_SELECT, USER_EDIT_PROPERTY, USER_EDIT_VALUE) = range(7)
 
 
-# 🚀 Início do comando /user
-@require_permission("owner")
-async def start_user(update: Update, context: ContextTypes.DEFAULT_TYPE):    
-    logger.info("→ Entrando em start_user()")
-
-    await send_menu_with_delete(
-        "👤 O que deseja fazer?",
-        update,
-        context,
-        main_menu_keyboard(),
-        delay=10
-    )
-    return MENU
-
-@require_permission("owner")
-# ▶️ Seleção do menu
-async def menu_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):    
-    logger.info("→ Entrando em menu_selection()")
-
-    query = update.callback_query
-    await query.answer()
-
-    # 🔥 Deleta a mensagem do menu anterior
-    await delete_protected_message(update, context)
-
-    if query.data == "add_user":
-        await send_and_delete("🆕 Envie o nome de usuário que deseja adicionar:", update, context)
-        return ADD_USERNAME
-
-    if query.data == "remove_user":
-        usuarios = produto_service.listar_usuarios()
-
-        if not usuarios:
-            await send_and_delete("🚫 Nenhum usuário encontrado.", update, context)
-            return ConversationHandler.END
-
-        await send_menu_with_delete(
-            "👥 Escolha o usuário que deseja remover:",
-            update,
-            context,
-            gerar_keyboard_usuarios(usuarios, "remover")
-        )
-        return REMOVE_USER
-
-    if query.data == "edit_user":
-        usuarios = produto_service.listar_usuarios()
-
-        if not usuarios:
-            await send_and_delete("🚫 Nenhum usuário encontrado.", update, context)
-            return ConversationHandler.END
-
-        await send_menu_with_delete(
-            "👥 Escolha o usuário que deseja editar:",
-            update,
-            context,
-            gerar_keyboard_usuarios(usuarios, "editar")
-        )
-        return EDIT_SELECT_USER
-
-
-@require_permission("owner")
-# ➕ Adicionar usuário
-async def add_username(update: Update, context: ContextTypes.DEFAULT_TYPE):    
-    logger.info("→ Entrando em add_username()")
-
-    try:
-        username = InputSanitizer.sanitize_username(update.message.text)
-
-        if produto_service.verificar_username_existe(username):
-            await send_and_delete(
-                "❌ Este nome de usuário já existe. Por favor, envie outro nome:",
-                update,
-                context
+class ModernUserHandler(MenuHandlerBase):
+    def __init__(self):
+        super().__init__("user")
+    
+    def create_main_menu_keyboard(self) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("➕ Adicionar", callback_data="add_user"),
+                InlineKeyboardButton("➖ Remover", callback_data="remove_user"),
+            ],
+            [
+                InlineKeyboardButton("✏️ Editar", callback_data="edit_user"),
+            ],
+            [
+                InlineKeyboardButton("🚫 Cancelar", callback_data="cancel"),
+            ],
+        ])
+    
+    def get_menu_text(self) -> str:
+        return "👤 O que deseja fazer?"
+    
+    def get_menu_state(self) -> int:
+        return USER_MENU
+    
+    def create_users_keyboard(self, action_prefix: str) -> InlineKeyboardMarkup:
+        """Create keyboard with user list."""
+        user_service = self.ensure_user_service_initialized(self._current_context)
+        users = user_service.get_all_users()
+        
+        keyboard = []
+        for user in users:
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"{user.username} ({user.level.value})", 
+                    callback_data=f"{action_prefix}:{user.id}"
+                )
+            ])
+        
+        keyboard.append([InlineKeyboardButton("🚫 Cancelar", callback_data="cancel")])
+        return InlineKeyboardMarkup(keyboard)
+    
+    def create_edit_properties_keyboard(self) -> InlineKeyboardMarkup:
+        """Create keyboard for editing user properties."""
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("📝 Nome", callback_data="edit_username"),
+                InlineKeyboardButton("🔒 Senha", callback_data="edit_password"),
+            ],
+            [
+                InlineKeyboardButton("🎭 Nível", callback_data="edit_level"),
+            ],
+            [
+                InlineKeyboardButton("🚫 Cancelar", callback_data="cancel")
+            ]
+        ])
+    
+    def create_level_keyboard(self) -> InlineKeyboardMarkup:
+        """Create keyboard for selecting user level."""
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("👤 User", callback_data="level_user"),
+                InlineKeyboardButton("👮 Admin", callback_data="level_admin"),
+            ],
+            [
+                InlineKeyboardButton("👑 Owner", callback_data="level_owner"),
+            ],
+            [
+                InlineKeyboardButton("🚫 Cancelar", callback_data="cancel")
+            ]
+        ])
+    
+    async def handle_menu_selection(self, request: HandlerRequest, selection: str) -> HandlerResponse:
+        """Handle main menu selections."""
+        self._current_context = request.context  # Store context for keyboard creation
+        
+        if selection == "add_user":
+            return self.create_smart_response(
+                message="🆕 Envie o nome de usuário que deseja adicionar:",
+                keyboard=None,
+                interaction_type=InteractionType.FORM_INPUT,
+                content_type=ContentType.INFO,
+                next_state=USER_ADD_USERNAME
             )
-            return ADD_USERNAME  # 🔥 Continua no mesmo estado
-
-        context.user_data["novo_username"] = username
-        
-    except ValueError as e:
-        await send_and_delete(f"❌ {str(e)}\n\nEnvie um nome de usuário válido:", update, context)
-        return ADD_USERNAME
-    await send_and_delete("🔑 Agora envie a senha para este usuário:", update, context)
-    return ADD_PASSWORD
-
-
-@require_permission("owner")
-async def add_password(update: Update, context: ContextTypes.DEFAULT_TYPE):    
-    logger.info("→ Entrando em add_password()")
-
-    username = context.user_data["novo_username"]
-    
-    try:
-        password = InputSanitizer.sanitize_password(update.message.text)
-
-        if produto_service.verificar_username_existe(username):
-            await send_and_delete("❌ Esse nome de usuário já existe.", update, context)
+        elif selection == "remove_user":
+            user_service = get_user_service(request.context)
+            users = user_service.get_all_users()
+            
+            if not users:
+                return self.create_smart_response(
+                    message="🚫 Nenhum usuário encontrado.",
+                    keyboard=None,
+                    interaction_type=InteractionType.ERROR_DISPLAY,
+                    content_type=ContentType.INFO,
+                    end_conversation=True
+                )
+            
+            return self.create_smart_response(
+                message="👥 Escolha o usuário que deseja remover:",
+                keyboard=self.create_users_keyboard("remove_user"),
+                interaction_type=InteractionType.MENU_NAVIGATION,
+                content_type=ContentType.SELECTION,
+                next_state=USER_REMOVE_SELECT
+            )
+        elif selection == "edit_user":
+            user_service = get_user_service(request.context)
+            users = user_service.get_all_users()
+            
+            if not users:
+                return self.create_smart_response(
+                    message="🚫 Nenhum usuário encontrado.",
+                    keyboard=None,
+                    interaction_type=InteractionType.ERROR_DISPLAY,
+                    content_type=ContentType.INFO,
+                    end_conversation=True
+                )
+            
+            return self.create_smart_response(
+                message="👥 Escolha o usuário que deseja editar:",
+                keyboard=self.create_users_keyboard("edit_user"),
+                interaction_type=InteractionType.MENU_NAVIGATION,
+                content_type=ContentType.SELECTION,
+                next_state=USER_EDIT_SELECT
+            )
+        elif selection == "cancel":
+            return self.create_smart_response(
+                message="🚫 Operação cancelada.",
+                keyboard=None,
+                interaction_type=InteractionType.CONFIRMATION,
+                content_type=ContentType.INFO,
+                end_conversation=True
+            )
         else:
-            produto_service.adicionar_usuario(username, password)
-            await send_and_delete("✅ Usuário adicionado com sucesso!", update, context)
-
-        return ConversationHandler.END
-        
-    except ValueError as e:
-        await send_and_delete(f"❌ {str(e)}\n\nEnvie uma senha válida:", update, context)
-        return ADD_PASSWORD
-
-@require_permission("owner")
-# ➖ Remover usuário
-async def remove_user(update: Update, context: ContextTypes.DEFAULT_TYPE):    
-    logger.info("→ Entrando em remove_user()")
-
-    await delete_protected_message(update, context)
-    query = update.callback_query
-    await query.answer()
-    username = query.data.split(":")[1]
-
-    if produto_service.verificar_username_existe(username):
-        produto_service.remover_usuario(username)
-        await query.message.edit_text(f"✅ Usuário '{username}' removido com sucesso.")
-    else:
-        await query.message.edit_text("❌ Usuário não encontrado.")
-
-    return ConversationHandler.END
-
-
-@require_permission("owner")
-# ✏️ Editar usuário
-async def edit_select_user(update: Update, context: ContextTypes.DEFAULT_TYPE):    
-    logger.info("→ Entrando em edit_select_user()")
-
-    await delete_protected_message(update, context)
-
-    query = update.callback_query
-    await query.answer()
-
-    username = query.data.split(":")[1]
-    context.user_data["edit_user"] = username
-
-    keyboard = [
-        [
-            InlineKeyboardButton("✏️ Alterar Nome", callback_data="edit_nome"),
-            InlineKeyboardButton("🔑 Alterar Senha", callback_data="edit_senha")
-        ]
-    ]
-    await send_menu_with_delete(
-        f"O que deseja editar em '{username}'?",
-        update,
-        context,
-        keyboard=InlineKeyboardMarkup(keyboard),
-        delay=10,          # ou o delay que quiser
-        protected=True     # se quiser proteger até o próximo clique
-    )
-    return EDIT_ACTION
-
-
-@require_permission("owner")
-async def edit_action(update: Update, context: ContextTypes.DEFAULT_TYPE):    
-    logger.info("→ Entrando em edit_action()")
-
+            return self.create_smart_response(
+                message="❌ Opção inválida.",
+                keyboard=self.create_main_menu_keyboard(),
+                interaction_type=InteractionType.ERROR_DISPLAY,
+                content_type=ContentType.VALIDATION_ERROR,
+                next_state=USER_MENU
+            )
     
-    await delete_protected_message(update, context)
+    async def handle(self, request: HandlerRequest) -> HandlerResponse:
+        """Handle initial user command - show main menu."""
+        return await self.show_main_menu(request)
+    
+    async def handle_add_username(self, request: HandlerRequest) -> HandlerResponse:
+        """Handle username input for new user."""
+        try:
+            username = InputSanitizer.sanitize_username(request.update.message.text)
+            
+            # Check if username already exists
+            user_service = get_user_service(request.context)
+            if user_service.username_exists(username):
+                return HandlerResponse(
+                    message="❌ Este nome de usuário já existe. Escolha outro:",
+                    next_state=USER_ADD_USERNAME,
+                    edit_message=True
+                )
+            
+            request.user_data["new_username"] = username
+            
+            return HandlerResponse(
+                message="🔒 Agora envie a senha para este usuário:",
+                next_state=USER_ADD_PASSWORD
+            )
+            
+        except ValueError as e:
+            return HandlerResponse(
+                message=f"❌ {str(e)}\n\nEnvie um nome de usuário válido:",
+                next_state=USER_ADD_USERNAME,
+                edit_message=True
+            )
+    
+    async def handle_add_password(self, request: HandlerRequest) -> HandlerResponse:
+        """Handle password input and create user."""
+        try:
+            password = InputSanitizer.sanitize_password(request.update.message.text)
+            username = request.user_data["new_username"]
+            
+            # Create user through business service
+            business_service = self.ensure_services_initialized()
+            user_request = UserManagementRequest(
+                action="add",
+                username=username,
+                password=password,
+                level=request.user_data.get("new_level", "user")  # Use level from user_data or default to user
+            )
+            
+            response = business_service.manage_user(user_request)
+            
+            return HandlerResponse(
+                message=response.message,
+                end_conversation=True
+            )
+            
+        except ValueError as e:
+            return HandlerResponse(
+                message=f"❌ {str(e)}\n\nEnvie uma senha válida:",
+                next_state=USER_ADD_PASSWORD,
+                edit_message=True
+            )
+    
+    async def handle_remove_user(self, request: HandlerRequest, user_id: int) -> HandlerResponse:
+        """Handle user removal."""
+        try:
+            user_service = get_user_service(request.context)
+            user = user_service.get_user_by_id(user_id)
+            
+            if not user:
+                return HandlerResponse(
+                    message="❌ Usuário não encontrado.",
+                    end_conversation=True
+                )
+            
+            business_service = self.ensure_services_initialized()
+            user_request = UserManagementRequest(
+                action="remove",
+                username=user.username,
+                target_user_id=user_id
+            )
+            
+            response = business_service.manage_user(user_request)
+            
+            return HandlerResponse(
+                message=response.message,
+                end_conversation=True
+            )
+            
+        except Exception as e:
+            return HandlerResponse(
+                message="❌ Erro ao remover usuário.",
+                end_conversation=True
+            )
+    
+    async def handle_edit_user_select(self, request: HandlerRequest, user_id: int) -> HandlerResponse:
+        """Handle user selection for editing."""
+        user_service = get_user_service(request.context)
+        user = user_service.get_user_by_id(user_id)
+        
+        if not user:
+            return HandlerResponse(
+                message="❌ Usuário não encontrado.",
+                end_conversation=True
+            )
+        
+        request.user_data["edit_user_id"] = user_id
+        request.user_data["edit_username"] = user.username
+        
+        return HandlerResponse(
+            message=f"✏️ Editando usuário: {user.username}\nO que deseja alterar?",
+            keyboard=self.create_edit_properties_keyboard(),
+            next_state=USER_EDIT_PROPERTY,
+            edit_message=True
+        )
+    
+    async def handle_edit_property_selection(self, request: HandlerRequest, property_type: str) -> HandlerResponse:
+        """Handle property selection for editing."""
+        request.user_data["edit_property"] = property_type
+        
+        if property_type == "edit_username":
+            return HandlerResponse(
+                message="📝 Envie o novo nome de usuário:",
+                next_state=USER_EDIT_VALUE,
+                edit_message=True
+            )
+        elif property_type == "edit_password":
+            return HandlerResponse(
+                message="🔒 Envie a nova senha:",
+                next_state=USER_EDIT_VALUE,
+                edit_message=True
+            )
+        elif property_type == "edit_level":
+            return HandlerResponse(
+                message="🎭 Escolha o novo nível de acesso:",
+                keyboard=self.create_level_keyboard(),
+                next_state=USER_EDIT_VALUE,
+                edit_message=True
+            )
+        else:
+            return HandlerResponse(
+                message="❌ Propriedade inválida.",
+                end_conversation=True
+            )
+    
+    async def handle_edit_value(self, request: HandlerRequest, new_value: str) -> HandlerResponse:
+        """Handle new value input for editing."""
+        property_type = request.user_data.get("edit_property")
+        user_id = request.user_data.get("edit_user_id")  
+        username = request.user_data.get("edit_username")
+        
+        try:
+            business_service = self.ensure_services_initialized()
+            
+            if property_type == "edit_username":
+                new_value = InputSanitizer.sanitize_username(new_value)
+                user_request = UserManagementRequest(
+                    action="edit",
+                    username=new_value,
+                    target_user_id=user_id
+                )
+            elif property_type == "edit_password":
+                new_value = InputSanitizer.sanitize_password(new_value)
+                user_request = UserManagementRequest(
+                    action="edit",
+                    username=username,
+                    password=new_value,
+                    target_user_id=user_id
+                )
+            elif property_type == "edit_level":
+                level_map = {
+                    "level_user": "user",
+                    "level_admin": "admin", 
+                    "level_owner": "owner"
+                }
+                level = level_map.get(new_value)
+                if not level:
+                    return HandlerResponse(
+                        message="❌ Nível inválido.",
+                        end_conversation=True,
+                        edit_message=True
+                    )
+                
+                user_request = UserManagementRequest(
+                    action="edit",
+                    username=username,
+                    level=level,
+                    target_user_id=user_id
+                )
+            else:
+                return HandlerResponse(
+                    message="❌ Tipo de edição inválido.",
+                    end_conversation=True
+                )
+            
+            response = business_service.manage_user(user_request)
+            
+            return HandlerResponse(
+                message=response.message,
+                end_conversation=True
+            )
+            
+        except ValueError as e:
+            return HandlerResponse(
+                message=f"❌ {str(e)}\n\nTente novamente:",
+                next_state=USER_EDIT_VALUE,
+                edit_message=True
+            )
+    
+    # Wrapper methods for conversation handler
+    @require_permission("owner")
+    @with_error_boundary("user_start")
+    async def start_user(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        return await self.safe_handle(self.handle, update, context)
+    
+    @with_error_boundary("user_menu")
+    async def menu_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        
+        # Use edit-in-place instead of deletion for better UX
+        # Menu will be updated via edit_message=True in responses
+        
+        request = self.create_request(update, context)
+        response = await self.handle_menu_selection(request, query.data)
+        return await self.send_response(response, request)
+    
+    @with_error_boundary("user_add_username")
+    async def add_username(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        request = self.create_request(update, context)
+        response = await self.handle_add_username(request)
+        return await self.send_response(response, request)
+    
+    @with_error_boundary("user_add_password")
+    async def add_password(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        request = self.create_request(update, context)
+        response = await self.handle_add_password(request)
+        return await self.send_response(response, request)
+    
+    @with_error_boundary("user_remove")  
+    async def remove_user_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        
+        user_id = int(query.data.split(":")[1])
+        
+        # Use edit-in-place instead of deletion for better UX
+        
+        request = self.create_request(update, context)
+        response = await self.handle_remove_user(request, user_id)
+        return await self.send_response(response, request)
+    
+    @with_error_boundary("user_edit_select")
+    async def edit_user_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        
+        user_id = int(query.data.split(":")[1])
+        
+        # Use edit-in-place instead of deletion for better UX
+        
+        request = self.create_request(update, context)
+        response = await self.handle_edit_user_select(request, user_id)
+        return await self.send_response(response, request)
+    
+    @with_error_boundary("user_edit_property")
+    async def edit_property_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        
+        # Use edit-in-place instead of deletion for better UX
+        
+        request = self.create_request(update, context)
+        response = await self.handle_edit_property_selection(request, query.data)
+        return await self.send_response(response, request)
+    
+    @with_error_boundary("user_edit_value")
+    async def edit_value_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        request = self.create_request(update, context)
+        
+        # Handle both text input and callback (for level selection)
+        if update.callback_query:
+            new_value = update.callback_query.data
+            await update.callback_query.answer()
+            try:
+                await self.batch_cleanup_messages([update.callback_query], strategy="instant")
+            except:
+                pass
+        else:
+            new_value = update.message.text
+        
+        response = await self.handle_edit_value(request, new_value)
+        return await self.send_response(response, request)
+    
+    @with_error_boundary("user_cancel")
+    async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        request = self.create_request(update, context)
+        response = HandlerResponse(
+            message="🚫 Operação cancelada.",
+            end_conversation=True
+        )
+        return await self.send_response(response, request)
+    
+    def get_conversation_handler(self) -> ConversationHandler:
+        """Create the conversation handler."""
+        return ConversationHandler(
+            entry_points=[CommandHandler("user", self.start_user)],
+            states={
+                USER_MENU: [
+                    CallbackQueryHandler(self.menu_selection)
+                ],
+                USER_ADD_USERNAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.add_username)
+                ],
+                USER_ADD_PASSWORD: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.add_password)
+                ],
+                USER_REMOVE_SELECT: [
+                    CallbackQueryHandler(self.remove_user_callback, pattern="^remove_user:")
+                ],
+                USER_EDIT_SELECT: [
+                    CallbackQueryHandler(self.edit_user_callback, pattern="^edit_user:")
+                ],
+                USER_EDIT_PROPERTY: [
+                    CallbackQueryHandler(self.edit_property_callback, pattern="^edit_")
+                ],
+                USER_EDIT_VALUE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.edit_value_input),
+                    CallbackQueryHandler(self.edit_value_input, pattern="^level_")
+                ],
+            },
+            fallbacks=[
+                CommandHandler("cancel", self.cancel),
+                CallbackQueryHandler(self.cancel, pattern="^cancel$")
+            ],
+            allow_reentry=True
+        )
 
-    query = update.callback_query
-    await query.answer()
 
-    acao = query.data
-
-    if acao == "edit_nome":
-        context.user_data["edit_action"] = "nome"
-        await send_and_delete("✏️ Envie o novo nome de usuário:", update, context)
-
-        return EDIT_NEW_VALUE
-
-    if acao == "edit_senha":
-        context.user_data["edit_action"] = "senha"
-        await send_and_delete("🔑 Envie a nova senha:", update, context)
-        return EDIT_NEW_VALUE
-
-
-@require_permission("owner")
-async def edit_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):    
-    logger.info("→ Entrando em edit_new_value()")
-
-    await delete_protected_message(update, context) 
-   
-    username = context.user_data["edit_user"]
-    acao = context.user_data["edit_action"]
-    novo_valor = update.message.text
-
-    if not produto_service.verificar_username_existe(username):
-        await send_and_delete("❌ Usuário não encontrado.", update, context)
-        return ConversationHandler.END
-
-    if acao == "nome":
-        produto_service.atualizar_username(username, novo_valor)
-        await send_and_delete("✅ Nome de usuário atualizado!", update, context)
-
-    if acao == "senha":
-        produto_service.atualizar_senha(username, novo_valor)
-        await send_and_delete("✅ Senha atualizada!", update, context)
-
-    return ConversationHandler.END
-
-def get_user_conversation_handler():
-    return ConversationHandler(
-        entry_points=[CommandHandler("user", start_user)],
-        states={
-            MENU: [CallbackQueryHandler(menu_selection)],
-            ADD_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_username)],
-            ADD_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_password)],
-            REMOVE_USER: [CallbackQueryHandler(remove_user)],
-            EDIT_SELECT_USER: [CallbackQueryHandler(edit_select_user)],
-            EDIT_ACTION: [CallbackQueryHandler(edit_action)],
-            EDIT_NEW_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_new_value)],
-        },
-        fallbacks=[
-            CommandHandler("cancel", cancel), 
-            CallbackQueryHandler(cancel_callback, pattern="^cancelar$")
-        ],
-        allow_reentry=True
-    )
-
-
-NEW_PASSWORD, CONFIRM_PASSWORD = range(2)
-
-
-async def start_password(update: Update, context: ContextTypes.DEFAULT_TYPE):    
-    logger.info("→ Entrando em start_password()")
-
-    await send_and_delete("🔑 Envie a nova senha:", update, context)
-    return NEW_PASSWORD
-
-
-async def received_new_password(update: Update, context: ContextTypes.DEFAULT_TYPE):    
-    logger.info("→ Entrando em received_new_password()")
-
-    context.user_data["new_password"] = update.message.text
-    await send_and_delete("🔐 Confirme a nova senha:", update, context)
-    return CONFIRM_PASSWORD
-
-
-async def confirm_password(update: Update, context: ContextTypes.DEFAULT_TYPE):    
-    logger.info("→ Entrando em confirm_password()")
-
-    new_password = context.user_data.get("new_password")
-    confirm_password = update.message.text
-    chat_id = update.effective_chat.id
-
-    username = produto_service.obter_username_por_chat_id(chat_id)
-
-    if username is None:
-        await send_and_delete("❌ Você não está logado. Use /login primeiro.", update, context)
-        return ConversationHandler.END
-
-    if new_password != confirm_password:
-        await send_and_delete("❌ As senhas não coincidem. Tente novamente.", update, context)
-        return ConversationHandler.END
-
-    produto_service.atualizar_senha(username, new_password)
-    await send_and_delete("✅ Sua senha foi atualizada com sucesso.", update, context)
-
-    return ConversationHandler.END
-
-def gerar_keyboard_usuarios(usuarios, callback_prefix):
-    """
-    Gera uma InlineKeyboardMarkup com botões dos usuários.
-    """
-    keyboard = []
-    for user in usuarios:
-        keyboard.append([InlineKeyboardButton(user, callback_data=f"{callback_prefix}:{user}")])
-
-    keyboard.append([InlineKeyboardButton("🚫 Cancelar", callback_data="cancelar")])
-    return InlineKeyboardMarkup(keyboard)
+# Factory function
+def get_modern_user_handler():
+    """Get the modern user conversation handler.""" 
+    handler = ModernUserHandler()
+    return handler.get_conversation_handler()

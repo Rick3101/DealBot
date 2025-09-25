@@ -6,11 +6,13 @@ Replaces the old service_container.py with better architecture.
 import logging
 from typing import Dict, Any, Optional
 from core.di_container import DIContainer
-from core.interfaces import IUserService, IProductService, ISalesService, IDatabaseManager, ISmartContractService
+from core.interfaces import IUserService, IProductService, ISalesService, IDatabaseManager, ISmartContractService, IBroadcastService, ICashBalanceService
 from services.user_service import UserService
 from services.product_service import ProductService
 from services.sales_service import SalesService
 from services.smartcontract_service import SmartContractService
+from services.broadcast_service import BroadcastService
+from services.cash_balance_service import CashBalanceService
 from database.connection import DatabaseManager
 
 
@@ -88,6 +90,18 @@ class ServiceRegistry:
         self._container.register_singleton(
             ISmartContractService,
             implementation_type=SmartContractService
+        )
+        
+        # Broadcast Service (singleton - stateless service)
+        self._container.register_singleton(
+            IBroadcastService,
+            implementation_type=BroadcastService
+        )
+
+        # Cash Balance Service (singleton - stateless service)
+        self._container.register_singleton(
+            ICashBalanceService,
+            implementation_type=CashBalanceService
         )
         
         self.logger.debug("All business services registered")
@@ -263,6 +277,42 @@ def get_smartcontract_service(context=None) -> ISmartContractService:
     except Exception as e:
         logging.getLogger(__name__).error(f"Failed to get smartcontract service: {e}")
         raise RuntimeError(f"SmartContract service unavailable: {str(e)}")
+
+
+def get_broadcast_service(context=None) -> IBroadcastService:
+    """
+    Get broadcast service instance.
+
+    Args:
+        context: Optional telegram context (maintained for backward compatibility)
+
+    Returns:
+        IBroadcastService implementation
+    """
+    try:
+        container = get_container()
+        return container.get_service(IBroadcastService)
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Failed to get broadcast service: {e}")
+        raise RuntimeError(f"Broadcast service unavailable: {str(e)}")
+
+
+def get_cash_balance_service(context=None) -> ICashBalanceService:
+    """
+    Get cash balance service instance.
+
+    Args:
+        context: Optional telegram context (maintained for backward compatibility)
+
+    Returns:
+        ICashBalanceService implementation
+    """
+    try:
+        container = get_container()
+        return container.get_service(ICashBalanceService)
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Failed to get cash balance service: {e}")
+        raise RuntimeError(f"Cash balance service unavailable: {str(e)}")
 
 
 def get_database_manager() -> IDatabaseManager:

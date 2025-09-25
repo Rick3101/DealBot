@@ -9,6 +9,8 @@ from datetime import datetime
 from models.user import User, UserLevel, CreateUserRequest, UpdateUserRequest
 from models.product import Product, ProductWithStock, CreateProductRequest, UpdateProductRequest, AddStockRequest, StockItem
 from models.sale import Sale, SaleItem, CreateSaleRequest, CreatePaymentRequest, Payment, SaleWithPayments
+from models.cash_balance import CashBalance, CashTransaction, CreateCashTransactionRequest, RevenueReport, CashBalanceHistory
+from decimal import Decimal
 
 
 class IUserService(ABC):
@@ -246,4 +248,82 @@ class IServiceContainer(ABC):
     @abstractmethod
     def health_check(self) -> Dict[str, Any]:
         """Perform health check on all services."""
+        pass
+
+
+class ICashBalanceService(ABC):
+    """Interface for cash balance and revenue management services."""
+
+    @abstractmethod
+    def get_current_balance(self) -> CashBalance:
+        """Get the current cash balance."""
+        pass
+
+    @abstractmethod
+    def add_revenue_from_payment(self, pagamento_id: int, valor: Decimal, venda_id: Optional[int] = None) -> CashTransaction:
+        """Add revenue from a payment to cash balance."""
+        pass
+
+    @abstractmethod
+    def add_expense(self, valor: Decimal, descricao: str, usuario_chat_id: Optional[int] = None) -> CashTransaction:
+        """Add an expense (reduces cash balance)."""
+        pass
+
+    @abstractmethod
+    def adjust_balance(self, valor: Decimal, descricao: str, usuario_chat_id: Optional[int] = None) -> CashTransaction:
+        """Make a manual balance adjustment."""
+        pass
+
+    @abstractmethod
+    def get_transactions_history(self, limit: int = 50, offset: int = 0) -> List[CashTransaction]:
+        """Get transaction history."""
+        pass
+
+    @abstractmethod
+    def get_revenue_report(self, days: int = 30) -> RevenueReport:
+        """Generate revenue report for the specified number of days."""
+        pass
+
+    @abstractmethod
+    def get_balance_history(self, days: int = 30) -> CashBalanceHistory:
+        """Get balance history for a period."""
+        pass
+
+
+class IBroadcastService(ABC):
+    """Interface for broadcast messaging services."""
+    
+    @abstractmethod
+    def create_text_broadcast(self, sender_chat_id: int, content: str, message_type: str) -> int:
+        """Create a text broadcast message (text, html, markdown)."""
+        pass
+    
+    @abstractmethod
+    def create_poll_broadcast(self, sender_chat_id: int, question: str, options: List[str]) -> int:
+        """Create a poll broadcast message."""
+        pass
+    
+    @abstractmethod
+    def create_dice_broadcast(self, sender_chat_id: int, emoji: str) -> int:
+        """Create a dice broadcast message."""
+        pass
+    
+    @abstractmethod
+    def send_broadcast(self, broadcast_id: int) -> Dict[str, Any]:
+        """Send broadcast message to all users."""
+        pass
+    
+    @abstractmethod
+    def get_broadcast_status(self, broadcast_id: int) -> Optional[Dict[str, Any]]:
+        """Get broadcast status and statistics."""
+        pass
+    
+    @abstractmethod
+    def get_all_broadcasts(self, sender_chat_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Get all broadcast messages, optionally filtered by sender."""
+        pass
+    
+    @abstractmethod
+    def delete_broadcast(self, broadcast_id: int) -> bool:
+        """Delete a broadcast message."""
         pass

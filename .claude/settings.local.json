@@ -6,7 +6,9 @@
       "Bash(taskkill:*)",
       "Bash(dir:*)",
       "Bash(findstr:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(del \"C:\\Users\\rikrd\\source\\repos\\NEWBOT\\models\\expedition.py\")",
+      "Bash(pip install:*)"
     ],
     "deny": [],
     "ask": []

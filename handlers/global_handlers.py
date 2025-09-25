@@ -3,6 +3,7 @@ from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 from handlers.error_handler import with_error_boundary_standalone
 from utils.message_cleaner import send_and_delete, delete_protected_message
+from handlers.base_handler import DelayConstants
 
 logger = logging.getLogger(__name__)
 
@@ -33,13 +34,14 @@ class ModernGlobalHandlers:
             if "protected_messages" in context.chat_data:
                 context.chat_data["protected_messages"] = set()
 
-            await msg.reply_text("🚫 Operação cancelada.")
+            # No confirmation message per UX Flow Guide Pattern 2.1
             
         except Exception as e:
             logger.error(f"Error in cancel handler: {e}", exc_info=True)
             # Fallback response
             if update.message:
-                await update.message.reply_text("🚫 Operação cancelada.")
+                # No confirmation message per UX Flow Guide Pattern 2.1
+                pass
         
         return ConversationHandler.END
 
@@ -65,14 +67,15 @@ class ModernGlobalHandlers:
             except Exception as e:
                 logger.warning(f"Failed to delete callback message during cancel: {e}")
 
-            await query.message.reply_text("🚫 Operação cancelada.")
+            # No confirmation message per UX Flow Guide Pattern 2.1
             
         except Exception as e:
             logger.error(f"Error in cancel_callback handler: {e}", exc_info=True)
             # Fallback response
             try:
                 if update.callback_query and update.callback_query.message:
-                    await update.callback_query.message.reply_text("🚫 Operação cancelada.")
+                    # No confirmation message per UX Flow Guide Pattern 2.1
+                    pass
             except:
                 pass
         
@@ -117,7 +120,7 @@ class ModernGlobalHandlers:
                 update,
                 context,
                 reply_markup=keyboard,
-                delay=30
+                delay=DelayConstants.FILE_TRANSFER // 4  # 30 seconds
             )
             
         except Exception as e:
@@ -163,7 +166,8 @@ class ModernGlobalHandlers:
                         "❌ Erro ao deletar dados. Tente novamente mais tarde."
                     )
             else:
-                await query.message.reply_text("🚫 Deleção cancelada.")
+                # No confirmation message per UX Flow Guide Pattern 2.1
+                pass
                 
         except Exception as e:
             logger.error(f"Error in confirm_delete_user handler: {e}", exc_info=True)
@@ -186,7 +190,7 @@ class ModernGlobalHandlers:
             "Faça login primeiro com /login",
             update,
             context,
-            delay=5
+            delay=DelayConstants.SUCCESS
         )
 
     @staticmethod
@@ -204,7 +208,7 @@ class ModernGlobalHandlers:
             "Use /commands para ver os comandos disponíveis.",
             update,
             context,
-            delay=10
+            delay=DelayConstants.INFO
         )
         
         return ConversationHandler.END
@@ -224,7 +228,7 @@ class ModernGlobalHandlers:
             "Operação reiniciada. Use /commands para continuar.",
             update,
             context,
-            delay=8
+            delay=DelayConstants.ERROR
         )
         
         return ConversationHandler.END

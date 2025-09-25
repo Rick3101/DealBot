@@ -723,11 +723,7 @@ class ModernRelatoriosHandler(MenuHandlerBase):
         except Exception as e:
             logger.warning(f"Could not delete message: {e}")
         
-        # Send confirmation message that will auto-delete
-        from utils.message_cleaner import send_and_delete
-        await send_and_delete("🚫 Relatório fechado.", update, context, delay=3)
-        
-        # End conversation
+        # End conversation cleanly without confirmation message (UX Flow Guide Pattern 2.1)
         from telegram.ext import ConversationHandler
         return ConversationHandler.END
 
@@ -1017,9 +1013,7 @@ async def fechar_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.warning(f"Could not delete message: {e}")
     
-    # Send confirmation message that will auto-delete
-    from utils.message_cleaner import send_and_delete
-    await send_and_delete("🚫 Relatório fechado.", update, context, delay=3)
+    # No confirmation message needed (UX Flow Guide Pattern 2.1)
 
 
 # Command handler registrations

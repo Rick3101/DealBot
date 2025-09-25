@@ -141,7 +141,7 @@ class BotApplication:
             
             # Wait for bot initialization to complete properly
             import time
-            max_wait = 10  # Maximum 10 seconds
+            max_wait = 35  # Maximum 35 seconds (longer than bot manager timeout of 25s)
             wait_time = 0
             
             while not self.bot_manager.is_ready and wait_time < max_wait:
@@ -286,14 +286,6 @@ class BotApplication:
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
         
-        @app.route("/miniapp")
-        def miniapp():
-            """Serve the Telegram MiniApp HTML page."""
-            try:
-                return render_template('miniapp.html')
-            except Exception as e:
-                self.logger.error(f"Error serving MiniApp: {e}")
-                return jsonify({"error": "MiniApp não disponível"}), 500
         
         @app.route("/api/dashboard")
         def api_dashboard():

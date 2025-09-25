@@ -7,7 +7,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     filters,
 )
-from handlers.base_handler import MenuHandlerBase, HandlerRequest, HandlerResponse, InteractionType, ContentType
+from handlers.base_handler import MenuHandlerBase, HandlerRequest, HandlerResponse, InteractionType, ContentType, DelayConstants
 from handlers.error_handler import with_error_boundary
 from models.handler_models import PurchaseRequest, ProductSelectionRequest
 from services.handler_business_service import HandlerBusinessService
@@ -61,7 +61,8 @@ class ModernBuyHandler(MenuHandlerBase):
                 keyboard=None,
                 interaction_type=InteractionType.CONFIRMATION,
                 content_type=ContentType.INFO,
-                end_conversation=True
+                end_conversation=True,
+                delay=DelayConstants.INFO  # Auto-delete cancel message after 10 seconds
             )
         elif selection.startswith("buyproduct:"):
             product_id = int(selection.split(":")[1])
@@ -135,6 +136,9 @@ class ModernBuyHandler(MenuHandlerBase):
     async def handle_buyer_name(self, request: HandlerRequest) -> HandlerResponse:
         """Handle buyer name input (owner only)."""
         try:
+            # Delete user input message immediately
+            await self.batch_cleanup_messages([request.update.message], strategy="instant")
+            
             buyer_name = InputSanitizer.sanitize_buyer_name(request.update.message.text)
             request.user_data["nome_comprador"] = buyer_name
             
@@ -155,6 +159,9 @@ class ModernBuyHandler(MenuHandlerBase):
     async def handle_quantity(self, request: HandlerRequest) -> HandlerResponse:
         """Handle quantity input."""
         try:
+            # Delete user input message immediately
+            await self.batch_cleanup_messages([request.update.message], strategy="instant")
+            
             quantity = InputSanitizer.sanitize_quantity(request.update.message.text)
             request.user_data["quantidade_atual"] = quantity
             
@@ -188,11 +195,13 @@ class ModernBuyHandler(MenuHandlerBase):
             
             request.user_data["itens_venda"].append(item)
             
+            # Send new product selection message instead of editing the existing one
+            # This preserves the product menu visibility
             return HandlerResponse(
-                message="🛒 Produto adicionado! Escolha outro ou finalize a compra.",
+                message="✅ Produto adicionado ao carrinho!\n\n🛒 Escolha outro produto ou finalize a compra:",
                 keyboard=self.create_products_keyboard(request, include_secret=False),
                 next_state=BUY_SELECT_PRODUCT,
-                edit_message=True
+                edit_message=False  # Don't edit, send new message
             )
             
         except ValueError as e:
@@ -204,6 +213,9 @@ class ModernBuyHandler(MenuHandlerBase):
     
     async def handle_secret_menu_check(self, request: HandlerRequest) -> HandlerResponse:
         """Handle secret menu activation."""
+        # Delete user input message immediately
+        await self.batch_cleanup_messages([request.update.message], strategy="instant")
+        
         text = request.update.message.text.strip()
         
         if text.lower() == self.secret_phrase:
@@ -264,7 +276,9 @@ class ModernBuyHandler(MenuHandlerBase):
         if response.success:
             return HandlerResponse(
                 message="✅ Compra finalizada e estoque atualizado!",
-                end_conversation=True
+                keyboard=None,
+                end_conversation=True,
+                delay=DelayConstants.SUCCESS  # Auto-delete success message after 5 seconds
             )
         else:
             error_message = response.message
@@ -273,7 +287,9 @@ class ModernBuyHandler(MenuHandlerBase):
             
             return HandlerResponse(
                 message=error_message,
-                end_conversation=True
+                keyboard=None,
+                end_conversation=True,
+                delay=DelayConstants.ERROR  # Auto-delete error message after 8 seconds
             )
     
     # Wrapper methods for conversation handler
@@ -293,9 +309,8 @@ class ModernBuyHandler(MenuHandlerBase):
         query = update.callback_query
         await query.answer()
         
-        # Delete protected message
-        # Use safe deletion method
-        await self.batch_cleanup_messages([query], strategy="instant")
+        # Don't delete the product menu immediately - let it persist for better UX
+        # Only delete when finalizing or canceling the purchase
         
         request = self.create_request(update, context)
         response = await self.handle_menu_selection(request, query.data)
@@ -324,7 +339,9 @@ class ModernBuyHandler(MenuHandlerBase):
         request = self.create_request(update, context)
         response = HandlerResponse(
             message="🚫 Compra cancelada.",
-            end_conversation=True
+            keyboard=None,
+            end_conversation=True,
+            delay=DelayConstants.INFO  # Auto-delete cancel message after 10 seconds
         )
         return await self.send_response(response, request)
     

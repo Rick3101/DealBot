@@ -21,7 +21,10 @@ from handlers.relatorios_handler import (
 from handlers.pagamento_handler import get_pagamento_conversation_handler, pagamento_command_handler, pagar_callback_handler
 from handlers.global_handlers import delete_user_data_handler, confirm_delete_user_handler
 from handlers.lista_produtos_handler import get_lista_produtos_handler
-from handlers.miniapp_handler import get_modern_miniapp_handler
+from handlers.broadcast_handler import get_modern_broadcast_handler
+from handlers.poll_interaction_handler import get_poll_interaction_handler
+from handlers.poll_answer_handler import create_poll_answer_handler
+from handlers.cash_balance_handler import get_cash_balance_handler
 
 # Legacy handlers have been removed - all modern handlers are now active
 
@@ -51,7 +54,7 @@ class HandlerMigrationManager:
             'smartcontract': True, # Modern handler active (migrated)
             'global_handlers': True, # Modern handler active (migrated)
             'lista_produtos': True, # Modern handler active (migrated)
-            'miniapp': True,    # Modern handler active
+            'broadcast': True,  # Modern handler active (broadcast messaging)
         }
     
     def register_handlers(self, application: Application):
@@ -110,18 +113,24 @@ class HandlerMigrationManager:
         application.add_handler(get_lista_produtos_handler())
         print("[OK] Registered lista produtos handler")
         
-        # Register MiniApp handler
-        application.add_handler(get_modern_miniapp_handler())
-        print("[OK] Registered miniapp handler")
-        
+        # Register Broadcast handler
+        application.add_handler(get_modern_broadcast_handler())
+        application.add_handler(get_poll_interaction_handler())
+        application.add_handler(create_poll_answer_handler())
+        print("[OK] Registered broadcast handler (with poll interaction and answer tracking)")
+
+        # Register Cash Balance handler
+        application.add_handler(get_cash_balance_handler())
+        print("[OK] Registered cash balance handler")
+
         print(f"\nHandler Status:")
-        print(f"[OK] Active handlers: {sum(self.use_modern_handlers.values())}")
+        print(f"[OK] Active handlers: {sum(self.use_modern_handlers.values()) + 1}")
         print(f"[INFO] All handlers using modern architecture")
     
     def enable_modern_handler(self, handler_name: str):
         """Enable modern handler for a specific feature (only applies to unmigrated handlers)."""
         if handler_name in self.use_modern_handlers:
-            if handler_name in ['login', 'product', 'buy', 'user', 'estoque', 'commands', 'start']:
+            if handler_name in ['login', 'product', 'buy', 'user', 'estoque', 'commands', 'start', 'broadcast']:
                 print(f"[INFO] Handler {handler_name} is already using modern implementation")
             else:
                 self.use_modern_handlers[handler_name] = True
@@ -132,7 +141,7 @@ class HandlerMigrationManager:
     def disable_modern_handler(self, handler_name: str):
         """Disable modern handler (only available for unmigrated handlers)."""
         if handler_name in self.use_modern_handlers:
-            if handler_name in ['login', 'product', 'buy', 'user', 'estoque', 'commands', 'start']:
+            if handler_name in ['login', 'product', 'buy', 'user', 'estoque', 'commands', 'start', 'broadcast']:
                 print(f"[WARN] Cannot disable {handler_name} - legacy version has been removed")
             else:
                 self.use_modern_handlers[handler_name] = False
@@ -151,7 +160,7 @@ class HandlerMigrationManager:
     
     def enable_all_modern_handlers(self):
         """Enable all available modern handlers."""
-        available_modern = ['login', 'product', 'buy', 'user', 'estoque', 'commands', 'start']
+        available_modern = ['login', 'product', 'buy', 'user', 'estoque', 'commands', 'start', 'broadcast']
         print("[INFO] All available modern handlers are already enabled")
         print(f"[OK] Modern handlers active: {', '.join(available_modern)}")
     

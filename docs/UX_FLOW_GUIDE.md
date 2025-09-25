@@ -57,6 +57,17 @@ User Action → Previous Message Deleted → New Message/Flow Continues
 - Filter selection message disappears instantly
 - Next input prompt appears (or results shown)
 
+### Pattern 2.1: **Instant Delete on Close/Cancel** ⚡ **CRITICAL UX PATTERN**
+**Use Case:** Close buttons, Cancel operations, Menu dismissal
+```
+User Action → Message Deleted Instantly → Clean Chat (No Confirmation)
+```
+**Example:** "❌ Fechar" or "🚫 Cancel" buttons
+- User clicks close/cancel button
+- Entire message and keyboard disappear immediately
+- No "Menu fechado" or confirmation message shown
+- Conversation ends cleanly
+
 ### Pattern 3: **Delayed Deletion**
 **Use Case:** Informational messages, confirmations, temporary content
 ```
@@ -115,6 +126,12 @@ Message Sent → Manual Deletion Only → Long-term Availability
    - Moving from selection to results
    - Switching between major features
    - Ending conversation flows
+
+4. **User Input Messages** ⚠️ **IMPORTANT**
+   - **Always delete user text inputs immediately** after processing
+   - Prevents chat clutter from user responses
+   - Maintains clean conversation flow
+   - Essential for professional appearance
 
 ---
 
@@ -227,9 +244,48 @@ async def _handle_apply_filters(self, request: HandlerRequest) -> HandlerRespons
             await request.update.callback_query.answer()
         except Exception as e:
             self.logger.warning(f"Could not delete message: {e}")
-    
+
     # Continue with next step
     return await self._start_filter_input(request)
+```
+
+### Example 2.1: Close/Cancel Button Implementation ⚡ **MANDATORY PATTERN**
+```python
+async def _handle_close_menu(self, request: HandlerRequest) -> HandlerResponse:
+    """Handle close/cancel buttons - instant deletion without confirmation."""
+    # Delete the message directly if it's a callback query
+    if request.update.callback_query:
+        try:
+            # Answer the callback query first
+            await request.update.callback_query.answer()
+            # Delete the message immediately
+            await request.update.callback_query.message.delete()
+        except Exception as e:
+            self.logger.error(f"Failed to delete menu message: {e}")
+
+    return HandlerResponse(
+        message="",  # Empty message, conversation ends
+        end_conversation=True
+        # NO delay, NO confirmation message
+    )
+```
+
+**❌ WRONG Way (Don't do this):**
+```python
+# BAD: Shows unnecessary confirmation message
+return HandlerResponse(
+    message="❌ Menu fechado.",
+    end_conversation=True,
+    delay=3  # Creates visual clutter
+)
+```
+
+**✅ CORRECT Way (Do this):**
+```python
+# GOOD: Clean instant deletion
+await request.update.callback_query.answer()
+await request.update.callback_query.message.delete()
+return HandlerResponse(message="", end_conversation=True)
 ```
 
 ### Example 3: Success Message with Auto-Deletion
@@ -285,7 +341,29 @@ HandlerResponse(
 )
 ```
 
-### Pattern B: Manual Deletion in Handlers
+### Pattern B: User Input Message Deletion ⚠️ **CRITICAL**
+```python
+async def _handle_text_input(self, request: HandlerRequest) -> HandlerResponse:
+    """Handle user text input - ALWAYS delete user message first"""
+
+    # 🔑 CRITICAL: Delete user's input message immediately
+    try:
+        await self.safe_delete_message(request.update.message, self.logger)
+    except:
+        pass  # Don't fail if deletion doesn't work
+
+    # Process the input
+    user_input = request.update.message.text.strip()
+
+    # Continue with business logic
+    return HandlerResponse(
+        message="Input processed successfully!",
+        next_state=NEXT_STATE,
+        delay=120  # Bot message cleanup
+    )
+```
+
+### Pattern C: Manual Deletion in Handlers
 ```python
 async def _handle_transition(self, request: HandlerRequest) -> HandlerResponse:
     # Delete current message when transitioning
@@ -346,12 +424,26 @@ def get_message_strategy(self, interaction_type: str, user_level: str) -> dict:
    - Adapt timing based on content importance
    - Respect user attention and chat cleanliness
 
+6. **User Input Cleanup** ⚠️ **MANDATORY**
+   - **Always delete user text input messages immediately** after processing
+   - Delete at the start of every text message handler
+   - Use `await self.safe_delete_message(request.update.message, self.logger)`
+   - Never leave user input messages in chat history
+
+7. **Close/Cancel Button Behavior** ⚡ **CRITICAL UX RULE**
+   - **All "Fechar", "Cancel", "Close" buttons must delete the message instantly**
+   - Never show "Menu fechado" or confirmation messages
+   - Answer callback query first, then delete message immediately
+   - End conversation cleanly without visual clutter
+   - Pattern: `await callback_query.answer() → await message.delete() → end_conversation=True`
+
 ### ❌ **Don'ts**
 
 1. **Avoid Message Spam**
    - Don't create multiple messages for single interactions
    - Don't leave orphaned temporary messages
    - Don't overwhelm chat with rapid message changes
+   - **Never leave user input messages visible after processing** ⚠️
 
 2. **Don't Break Context**
    - Don't delete important reference information too quickly
@@ -367,6 +459,12 @@ def get_message_strategy(self, interaction_type: str, user_level: str) -> dict:
    - Don't edit when you should delete
    - Don't delete instantly when user needs time to read
    - Don't auto-delete important content
+
+5. **Don't Show Confirmation for Close/Cancel** ⚠️ **CRITICAL**
+   - **Never show "Menu fechado", "Cancelled", or similar messages for close buttons**
+   - Don't use delay timers for close/cancel operations
+   - Don't leave the message visible after user clicks close
+   - Don't create additional clutter when user wants to dismiss content
 
 ---
 

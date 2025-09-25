@@ -97,10 +97,67 @@ def initialize_schema():
         data_atualizacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- Create BroadcastMessages table (for broadcast messaging system)
+    CREATE TABLE IF NOT EXISTS BroadcastMessages (
+        id SERIAL PRIMARY KEY,
+        sender_chat_id BIGINT NOT NULL,
+        message_type VARCHAR(20) NOT NULL CHECK (message_type IN ('text', 'html', 'markdown', 'poll', 'dice')),
+        message_content TEXT NOT NULL,
+        poll_question TEXT,
+        poll_options JSON,
+        dice_emoji VARCHAR(10),
+        total_recipients INTEGER DEFAULT 0,
+        successful_deliveries INTEGER DEFAULT 0,
+        failed_deliveries INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        sent_at TIMESTAMP,
+        completed_at TIMESTAMP,
+        status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'sending', 'completed', 'failed'))
+    );
+
+    -- Create PollAnswers table (for tracking poll responses)
+    CREATE TABLE IF NOT EXISTS PollAnswers (
+        id SERIAL PRIMARY KEY,
+        broadcast_id INTEGER REFERENCES BroadcastMessages(id) ON DELETE CASCADE,
+        poll_id VARCHAR(255) NOT NULL,
+        user_id BIGINT NOT NULL,
+        username VARCHAR(100),
+        option_id INTEGER NOT NULL,
+        option_text TEXT NOT NULL,
+        answered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(poll_id, user_id)
+    );
+
+    -- Create CashBalance table (for revenue tracking)
+    CREATE TABLE IF NOT EXISTS CashBalance (
+        id SERIAL PRIMARY KEY,
+        saldo_atual DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+        data_atualizacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Create CashTransactions table (for balance history)
+    CREATE TABLE IF NOT EXISTS CashTransactions (
+        id SERIAL PRIMARY KEY,
+        tipo VARCHAR(20) NOT NULL CHECK (tipo IN ('receita', 'despesa', 'ajuste')),
+        valor DECIMAL(10,2) NOT NULL,
+        descricao TEXT,
+        venda_id INTEGER REFERENCES Vendas(id),
+        pagamento_id INTEGER REFERENCES Pagamentos(id),
+        usuario_chat_id BIGINT,
+        saldo_anterior DECIMAL(10,2) NOT NULL,
+        saldo_novo DECIMAL(10,2) NOT NULL,
+        data_transacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
     -- Insert default configuration values
-    INSERT INTO Configuracoes (chave, valor, descricao) 
+    INSERT INTO Configuracoes (chave, valor, descricao)
     VALUES ('frase_start', 'Bot inicializado com sucesso!', 'Mensagem exibida no comando /start')
     ON CONFLICT (chave) DO NOTHING;
+
+    -- Initialize cash balance if not exists
+    INSERT INTO CashBalance (saldo_atual)
+    SELECT 0.00
+    WHERE NOT EXISTS (SELECT 1 FROM CashBalance LIMIT 1);
 
     -- Create indexes for better performance
     CREATE INDEX IF NOT EXISTS idx_usuarios_chat_id ON Usuarios(chat_id);
@@ -113,6 +170,16 @@ def initialize_schema():
     CREATE INDEX IF NOT EXISTS idx_pagamentos_venda_id ON Pagamentos(venda_id);
     CREATE INDEX IF NOT EXISTS idx_smartcontracts_codigo ON SmartContracts(codigo);
     CREATE INDEX IF NOT EXISTS idx_transacoes_contract_id ON Transacoes(contract_id);
+    CREATE INDEX IF NOT EXISTS idx_broadcastmessages_sender ON BroadcastMessages(sender_chat_id);
+    CREATE INDEX IF NOT EXISTS idx_broadcastmessages_status ON BroadcastMessages(status);
+    CREATE INDEX IF NOT EXISTS idx_broadcastmessages_created ON BroadcastMessages(created_at);
+    CREATE INDEX IF NOT EXISTS idx_pollanswers_broadcast_id ON PollAnswers(broadcast_id);
+    CREATE INDEX IF NOT EXISTS idx_pollanswers_poll_id ON PollAnswers(poll_id);
+    CREATE INDEX IF NOT EXISTS idx_pollanswers_user_id ON PollAnswers(user_id);
+    CREATE INDEX IF NOT EXISTS idx_cashtransactions_tipo ON CashTransactions(tipo);
+    CREATE INDEX IF NOT EXISTS idx_cashtransactions_data ON CashTransactions(data_transacao);
+    CREATE INDEX IF NOT EXISTS idx_cashtransactions_venda ON CashTransactions(venda_id);
+    CREATE INDEX IF NOT EXISTS idx_cashtransactions_pagamento ON CashTransactions(pagamento_id);
     """
     
     try:
@@ -136,9 +203,10 @@ def health_check_schema() -> dict:
         Dictionary with schema health status
     """
     required_tables = [
-        'usuarios', 'produtos', 'vendas', 'itensvenda', 
-        'estoque', 'pagamentos', 'smartcontracts', 
-        'transacoes', 'configuracoes'
+        'usuarios', 'produtos', 'vendas', 'itensvenda',
+        'estoque', 'pagamentos', 'smartcontracts',
+        'transacoes', 'configuracoes', 'broadcastmessages',
+        'pollanswers', 'cashbalance', 'cashtransactions'
     ]
     
     db_manager = get_db_manager()

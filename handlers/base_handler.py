@@ -436,7 +436,11 @@ class BaseHandler(ABC):
         if response.edit_message:
             try:
                 from telegram.constants import ParseMode
-                
+
+                # Skip editing if message is empty (handler already managed the message)
+                if not response.message:
+                    return self._handle_conversation_end_or_next_state(response)
+
                 # Handle callback query editing
                 if hasattr(request.update, 'callback_query') and request.update.callback_query:
                     parse_mode = getattr(ParseMode, response.parse_mode, ParseMode.MARKDOWN) if response.parse_mode else ParseMode.MARKDOWN
@@ -486,9 +490,13 @@ class BaseHandler(ABC):
     async def _send_new_message(self, response: HandlerResponse, request: HandlerRequest):
         """Send a new message using the existing message management utilities."""
         from telegram.constants import ParseMode
-        
+
+        # Skip sending if message is empty (for cases where handler already managed the message)
+        if not response.message:
+            return None
+
         parse_mode = getattr(ParseMode, response.parse_mode, ParseMode.MARKDOWN) if response.parse_mode else ParseMode.MARKDOWN
-        
+
         if response.keyboard:
             return await send_menu_with_delete(
                 response.message,

@@ -64,6 +64,7 @@ class ModernCommandsHandler(BaseHandler):
                 "/relatorios - Relatórios vendas/dívidas + CSV",
                 "/dividas - Relatório pessoal de dívidas",
                 "/detalhes - Informações detalhadas de vendas",
+                "/saldo - Controle de caixa e receitas",
                 ""
             ])
         

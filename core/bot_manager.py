@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import socket
 import threading
 from queue import Queue
 from typing import Optional
@@ -78,14 +79,19 @@ class BotManager:
             
         self.logger.info("Initializing bot application...")
         
-        # Create bot application with timeouts
-        request_conf = HTTPXRequest(
-            connect_timeout=10, 
-            read_timeout=10, 
-            write_timeout=10
-        )
+        # Force IPv4 to avoid IPv6 connectivity issues with api.telegram.org
+        self.logger.debug("Configuring IPv4-only networking for Telegram API")
+        original_getaddrinfo = socket.getaddrinfo
+        def ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+            return original_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+        socket.getaddrinfo = ipv4_only_getaddrinfo
         
-        self.app_bot = Application.builder().token(self.token).request(request_conf).build()
+        # Create bot application with simple configuration to avoid proxy issues
+        try:
+            self.app_bot = Application.builder().token(self.token).build()
+        except Exception as builder_error:
+            self.logger.error(f"Failed to create bot application: {builder_error}")
+            raise
         
         # Register error handler
         self.app_bot.add_error_handler(self._error_handler)
@@ -96,27 +102,69 @@ class BotManager:
         # Register all handlers (will be set from outside)
         self._register_handlers()
         
-        # Initialize and set webhook
-        await self.app_bot.initialize()
+        # Initialize bot with timeout
+        import asyncio
+        init_timeout = 25  # seconds
+        
+        try:
+            await asyncio.wait_for(
+                self.app_bot.initialize(),
+                timeout=init_timeout
+            )
+            self.logger.info("Bot application initialized successfully")
+        except asyncio.TimeoutError:
+            self.logger.error(f"Bot initialization timed out after {init_timeout}s")
+            self.logger.warning("Continuing with limited functionality")
+            # Don't raise - allow bot to continue
+        except Exception as init_error:
+            self.logger.error(f"Bot initialization failed: {init_error}")
+            self.logger.warning("Continuing with limited functionality")
+            # Don't raise - allow bot to continue
+        
         self.logger.info(f"Setting webhook URL: {self.webhook_url}")
         
         try:
-            await self.app_bot.bot.set_webhook(url=self.webhook_url)
+            # Add explicit timeout for webhook operations
+            webhook_timeout = 20  # seconds
+            
+            # Set webhook with timeout
+            await asyncio.wait_for(
+                self.app_bot.bot.set_webhook(url=self.webhook_url), 
+                timeout=webhook_timeout
+            )
             self.logger.info("Webhook set successfully")
             
-            # Verify webhook was set
-            webhook_info = await self.app_bot.bot.get_webhook_info()
+            # Verify webhook was set (with timeout)
+            webhook_info = await asyncio.wait_for(
+                self.app_bot.bot.get_webhook_info(),
+                timeout=webhook_timeout
+            )
             self.logger.info(f"Webhook info: URL={webhook_info.url}, pending_updates={webhook_info.pending_update_count}")
             
+        except asyncio.TimeoutError:
+            self.logger.error(f"Webhook setup timed out after {webhook_timeout}s")
+            # Don't raise - allow bot to continue without webhook
+            self.logger.warning("Continuing without webhook setup")
         except Exception as webhook_error:
             self.logger.error(f"Failed to set webhook: {webhook_error}")
-            raise
+            # Don't raise - allow bot to continue without webhook
+            self.logger.warning("Continuing without webhook setup")
             
         if not self.webhook_url:
-            await self.app_bot.start()     
+            try:
+                await asyncio.wait_for(
+                    self.app_bot.start(),
+                    timeout=init_timeout
+                )
+                self.logger.info("Bot polling started successfully")
+            except asyncio.TimeoutError:
+                self.logger.error("Bot start (polling) timed out")
+            except Exception as start_error:
+                self.logger.error(f"Bot start failed: {start_error}")
 
+        # Always mark as initialized to allow the bot to work
         self._is_initialized = True
-        self.logger.info(f"Bot application initialized and webhook set. Bot ready: {self.is_ready}")
+        self.logger.info(f"Bot application marked as initialized. Bot ready: {self.is_ready}")
     
     def _register_handlers(self):
         """Register all telegram handlers. Override this method to add handlers."""

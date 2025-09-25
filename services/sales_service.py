@@ -238,10 +238,10 @@ class SalesService(BaseService, ISalesService):
     def get_unpaid_sales(self, buyer_name: Optional[str] = None) -> List[SaleWithPayments]:
         """
         Get sales with outstanding balances.
-        
+
         Args:
             buyer_name: Buyer name to filter by (None for all buyers)
-            
+
         Returns:
             List of sales with payment information
         """
@@ -258,7 +258,7 @@ class SalesService(BaseService, ISalesService):
                     LEFT JOIN Pagamentos p ON v.id = p.venda_id
                     WHERE v.comprador = %s
                     GROUP BY v.id, v.comprador, v.data_venda
-                    HAVING COALESCE(SUM(iv.quantidade * iv.valor_unitario), 0) > COALESCE(SUM(p.valor_pago), 0)
+                    HAVING COALESCE(SUM(iv.quantidade * iv.valor_unitario), 0) - COALESCE(SUM(p.valor_pago), 0) > 0.001
                     ORDER BY v.data_venda DESC
                 """
                 params = (buyer_name,)
@@ -273,33 +273,35 @@ class SalesService(BaseService, ISalesService):
                 LEFT JOIN ItensVenda iv ON v.id = iv.venda_id
                 LEFT JOIN Pagamentos p ON v.id = p.venda_id
                 GROUP BY v.id, v.comprador, v.data_venda
-                HAVING COALESCE(SUM(iv.quantidade * iv.valor_unitario), 0) > COALESCE(SUM(p.valor_pago), 0)
+                HAVING COALESCE(SUM(iv.quantidade * iv.valor_unitario), 0) - COALESCE(SUM(p.valor_pago), 0) > 0.001
                 ORDER BY v.data_venda DESC
             """
             params = ()
-        
+
         rows = self._execute_query(base_query, params, fetch_all=True)
-        
+
         unpaid_sales = []
         if rows:
             for row in rows:
                 sale_data = row[:3]  # Sale data
                 total_paid = float(row[4])
-                
+
                 # Get full sale with items
                 sale = self.get_sale_by_id(row[0])
                 if sale:
                     # Get payments
                     payments = self.get_payments_for_sale(sale.id)
-                    
+
                     sale_with_payments = SaleWithPayments(
                         sale=sale,
                         payments=payments,
                         total_paid=total_paid
                     )
-                    
-                    unpaid_sales.append(sale_with_payments)
-        
+
+                    # Double check that the balance is indeed unpaid (avoid floating point issues)
+                    if sale_with_payments.balance_due > 0.001:
+                        unpaid_sales.append(sale_with_payments)
+
         return unpaid_sales
     
     def get_payments_for_sale(self, sale_id: int) -> List[Payment]:
@@ -356,25 +358,46 @@ class SalesService(BaseService, ISalesService):
         
         # Create payment
         query = """
-            INSERT INTO Pagamentos (venda_id, valor_pago) 
-            VALUES (%s, %s) 
+            INSERT INTO Pagamentos (venda_id, valor_pago)
+            VALUES (%s, %s)
             RETURNING id, venda_id, valor_pago, data_pagamento
         """
-        
+
         try:
             row = self._execute_query(
-                query, 
-                (request.venda_id, request.valor_pago), 
+                query,
+                (request.venda_id, request.valor_pago),
                 fetch_one=True
             )
-            
+
             if not row:
                 raise ServiceError("Failed to create payment - no row returned")
-            
+
             payment = Payment.from_db_row(row)
-            
+
+            # Add revenue to cash balance - CRITICAL for /saldo update
+            try:
+                from core.modern_service_container import get_cash_balance_service
+                from decimal import Decimal
+
+                cash_service = get_cash_balance_service()
+
+                # Convert float to Decimal for cash balance service
+                valor_decimal = Decimal(str(payment.valor_pago))
+
+                cash_transaction = cash_service.add_revenue_from_payment(
+                    pagamento_id=payment.id,
+                    valor=valor_decimal,
+                    venda_id=payment.venda_id
+                )
+                self.logger.info(f"SUCCESS: Payment R${payment.valor_pago} added to cash balance. New balance: R${cash_transaction.saldo_novo}")
+
+            except Exception as cash_error:
+                self.logger.error(f"CRITICAL: Failed to update cash balance for payment {payment.id}: {cash_error}", exc_info=True)
+                # Still don't fail the payment creation, but log the error clearly
+
             self._log_operation(
-                "payment_created", 
+                "payment_created",
                 venda_id=request.venda_id,
                 valor_pago=request.valor_pago,
                 payment_id=payment.id

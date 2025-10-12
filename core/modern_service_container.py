@@ -6,13 +6,17 @@ Replaces the old service_container.py with better architecture.
 import logging
 from typing import Dict, Any, Optional
 from core.di_container import DIContainer
-from core.interfaces import IUserService, IProductService, ISalesService, IDatabaseManager, ISmartContractService, IBroadcastService, ICashBalanceService
+from core.interfaces import IUserService, IProductService, ISalesService, IDatabaseManager, ISmartContractService, IBroadcastService, ICashBalanceService, IExpeditionService, IBramblerService, IWebSocketService, IExportService
 from services.user_service import UserService
 from services.product_service import ProductService
 from services.sales_service import SalesService
 from services.smartcontract_service import SmartContractService
 from services.broadcast_service import BroadcastService
 from services.cash_balance_service import CashBalanceService
+from services.expedition_service import ExpeditionService
+from services.brambler_service import BramblerService
+from services.websocket_service import WebSocketService
+from services.export_service import ExportService
 from database.connection import DatabaseManager
 
 
@@ -48,6 +52,7 @@ class ServiceRegistry:
         # Register services with their interfaces
         self._register_core_services()
         self._register_business_services()
+        self._register_expedition_services()
         
         self._initialized = True
         self.logger.info("Service container initialized successfully")
@@ -105,11 +110,74 @@ class ServiceRegistry:
         )
         
         self.logger.debug("All business services registered")
-    
+
+    def _register_expedition_services(self):
+        """Register expedition-related services."""
+        self.logger.debug("Registering expedition services...")
+
+        # Brambler Service (singleton - stateless service)
+        self._container.register_singleton(
+            IBramblerService,
+            implementation_type=BramblerService
+        )
+
+        # Expedition Service (singleton - stateless service with product service dependency)
+        self._container.register_singleton(
+            IExpeditionService,
+            factory=self._create_expedition_service
+        )
+
+        # WebSocket Service (singleton - real-time updates service)
+        self._container.register_singleton(
+            IWebSocketService,
+            implementation_type=WebSocketService
+        )
+
+        # Export Service (singleton - stateless export service)
+        self._container.register_singleton(
+            IExportService,
+            implementation_type=ExportService
+        )
+
+        self.logger.debug("All expedition services registered")
+
+    def _create_expedition_service(self) -> ExpeditionService:
+        """Factory method for creating expedition service with dependencies."""
+        product_service = self._container.get_service(IProductService)
+        return ExpeditionService(product_service=product_service)
+
     def _create_database_manager(self) -> DatabaseManager:
         """Factory method for creating database manager."""
-        from database import get_db_manager
-        return get_db_manager()
+        from database import get_db_manager, initialize_database
+        import os
+
+        try:
+            # Ensure database is initialized before getting manager
+            # This is a safety check in case services are accessed before app initialization
+            return get_db_manager()
+        except RuntimeError as e:
+            if "not initialized" in str(e):
+                self.logger.warning("Database manager not initialized, attempting to initialize now...")
+                try:
+                    # Load environment variables if not already loaded
+                    try:
+                        from dotenv import load_dotenv
+                        load_dotenv()
+                    except ImportError:
+                        pass
+
+                    # Initialize database with environment URL
+                    database_url = os.environ.get('DATABASE_URL')
+                    if not database_url:
+                        raise RuntimeError("DATABASE_URL environment variable not set. Please check your .env file.")
+
+                    initialize_database(database_url)
+                    return get_db_manager()
+                except Exception as init_error:
+                    self.logger.error(f"Failed to initialize database: {init_error}")
+                    raise RuntimeError(f"Database initialization failed: {init_error}")
+            else:
+                raise
     
     def get_container(self) -> DIContainer:
         """Get the initialized container."""
@@ -315,10 +383,82 @@ def get_cash_balance_service(context=None) -> ICashBalanceService:
         raise RuntimeError(f"Cash balance service unavailable: {str(e)}")
 
 
+def get_expedition_service(context=None) -> IExpeditionService:
+    """
+    Get expedition service instance.
+
+    Args:
+        context: Optional telegram context (maintained for backward compatibility)
+
+    Returns:
+        IExpeditionService implementation
+    """
+    try:
+        container = get_container()
+        return container.get_service(IExpeditionService)
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Failed to get expedition service: {e}")
+        raise RuntimeError(f"Expedition service unavailable: {str(e)}")
+
+
+def get_brambler_service(context=None) -> IBramblerService:
+    """
+    Get brambler service instance.
+
+    Args:
+        context: Optional telegram context (maintained for backward compatibility)
+
+    Returns:
+        IBramblerService implementation
+    """
+    try:
+        container = get_container()
+        return container.get_service(IBramblerService)
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Failed to get brambler service: {e}")
+        raise RuntimeError(f"Brambler service unavailable: {str(e)}")
+
+
+def get_websocket_service(context=None) -> IWebSocketService:
+    """
+    Get WebSocket service instance.
+
+    Args:
+        context: Optional telegram context (maintained for backward compatibility)
+
+    Returns:
+        IWebSocketService implementation
+    """
+    try:
+        container = get_container()
+        return container.get_service(IWebSocketService)
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Failed to get websocket service: {e}")
+        raise RuntimeError(f"WebSocket service unavailable: {str(e)}")
+
+
+def get_export_service(context=None) -> IExportService:
+    """
+    Get export service instance.
+
+    Args:
+        context: Optional telegram context (maintained for backward compatibility)
+
+    Returns:
+        IExportService implementation
+    """
+    try:
+        container = get_container()
+        return container.get_service(IExportService)
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Failed to get export service: {e}")
+        raise RuntimeError(f"Export service unavailable: {str(e)}")
+
+
 def get_database_manager() -> IDatabaseManager:
     """
     Get database manager instance.
-    
+
     Returns:
         IDatabaseManager implementation
     """

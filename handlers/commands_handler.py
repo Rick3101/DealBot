@@ -58,6 +58,7 @@ class ModernCommandsHandler(BaseHandler):
                 "/buy - Fluxo de compras com validação FIFO",
                 "/estoque - Gerenciamento de inventário",
                 "/pagar - Processamento de pagamentos",
+                "/expedition - Gerenciamento de expedições piratas",
                 "",
                 "📊 **Relatórios & Informações:**",
                 "/lista_produtos - Catálogo com mídia",
@@ -83,6 +84,7 @@ class ModernCommandsHandler(BaseHandler):
         if level in ["admin", "owner"]:
             commands.extend([
                 "🎯 **Recursos Especiais:**",
+                "• Expedições Piratas: Sistema completo de missões",
                 "• Menu Secreto: Palavras especiais no /buy",
                 "• Auto-deleção: Mensagens sensíveis",
                 "• CSV Export: Todos os relatórios",

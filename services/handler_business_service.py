@@ -1,4 +1,5 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
+from datetime import datetime
 from services.base_service import BaseService, ServiceError, ValidationError, NotFoundError
 from core.config import get_secret_menu_emojis
 from models.handler_models import (
@@ -484,16 +485,16 @@ class HandlerBusinessService(BaseService):
                     message="❌ Erro interno ao criar contrato. Tente novamente."
                 )
     
-    def get_contract_by_code(self, chat_id: int, contract_code: str):
+    def get_contract_by_code(self, chat_id: int, contract_code: str) -> Optional[Any]:
         """
         Get smart contract by code.
-        
+
         Args:
             chat_id: User's chat ID
             contract_code: Contract code to search
-            
+
         Returns:
-            Contract data or None if not found
+            Contract data object with id, chat_id, code, and created_at attributes or None if not found
         """
         try:
             from core.modern_service_container import get_smartcontract_service
@@ -552,15 +553,15 @@ class HandlerBusinessService(BaseService):
                 message=f"❌ Erro na operação: {str(e)}"
             )
     
-    def get_contract_transactions(self, contract_id: int):
+    def get_contract_transactions(self, contract_id: int) -> List[Tuple[int, int, str, str, datetime]]:
         """
         Get all transactions for a contract.
-        
+
         Args:
             contract_id: Contract ID
-            
+
         Returns:
-            List of transactions
+            List of tuples: (id, contract_id, description, participant_name, created_at)
         """
         try:
             from core.modern_service_container import get_smartcontract_service

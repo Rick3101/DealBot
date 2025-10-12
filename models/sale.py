@@ -47,18 +47,26 @@ class Sale:
     comprador: str
     data: str  # ISO format datetime string
     items: Optional[List[SaleItem]] = None
+    expedition_id: Optional[int] = None
     
     @classmethod
     def from_db_row(cls, row: tuple) -> 'Sale':
         """Create Sale from database row."""
         if not row:
             return None
-        
-        id_, comprador, data = row
+
+        # Handle both old format (3 fields) and new format (4 fields)
+        if len(row) == 3:
+            id_, comprador, data = row
+            expedition_id = None
+        else:
+            id_, comprador, data, expedition_id = row
+
         return cls(
             id=id_,
             comprador=comprador,
-            data=str(data)
+            data=str(data),
+            expedition_id=expedition_id
         )
     
     def get_total_value(self) -> float:
@@ -127,6 +135,7 @@ class CreateSaleRequest:
     """Request model for creating sales."""
     comprador: str
     items: List['CreateSaleItemRequest']
+    expedition_id: Optional[int] = None
     
     def validate(self) -> list[str]:
         """Validate the create sale request."""

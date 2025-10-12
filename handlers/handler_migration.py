@@ -25,6 +25,10 @@ from handlers.broadcast_handler import get_modern_broadcast_handler
 from handlers.poll_interaction_handler import get_poll_interaction_handler
 from handlers.poll_answer_handler import create_poll_answer_handler
 from handlers.cash_balance_handler import get_cash_balance_handler
+from handlers.expedition_handler import get_expedition_handler
+from handlers.brambler_handler import get_brambler_handler
+from handlers.item_naming_handler import get_item_naming_handler
+from handlers.miniapp_handler import MiniAppHandler
 
 # Legacy handlers have been removed - all modern handlers are now active
 
@@ -55,6 +59,9 @@ class HandlerMigrationManager:
             'global_handlers': True, # Modern handler active (migrated)
             'lista_produtos': True, # Modern handler active (migrated)
             'broadcast': True,  # Modern handler active (broadcast messaging)
+            'expedition': True, # Modern handler active (expedition management)
+            'brambler': True,   # Modern handler active (pirate name management)
+            'item_naming': True, # Modern handler active (item name management)
         }
     
     def register_handlers(self, application: Application):
@@ -123,8 +130,28 @@ class HandlerMigrationManager:
         application.add_handler(get_cash_balance_handler())
         print("[OK] Registered cash balance handler")
 
+        # Register Expedition handler
+        application.add_handler(get_expedition_handler())
+        print("[OK] Registered expedition handler")
+
+        # Register Brambler handler
+        application.add_handler(get_brambler_handler())
+        print("[OK] Registered brambler handler")
+
+        # Register Item Naming handler
+        application.add_handler(get_item_naming_handler())
+        print("[OK] Registered item naming handler")
+
+        # Register Mini App handler
+        from core.modern_service_container import get_user_service
+        user_service = get_user_service(None)
+        miniapp_handler = MiniAppHandler(user_service)
+        for handler in miniapp_handler.get_handlers():
+            application.add_handler(handler)
+        print("[OK] Registered mini app handler")
+
         print(f"\nHandler Status:")
-        print(f"[OK] Active handlers: {sum(self.use_modern_handlers.values()) + 1}")
+        print(f"[OK] Active handlers: {sum(self.use_modern_handlers.values()) + 2}")
         print(f"[INFO] All handlers using modern architecture")
     
     def enable_modern_handler(self, handler_name: str):

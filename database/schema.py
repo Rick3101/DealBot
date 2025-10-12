@@ -33,11 +33,31 @@ def initialize_schema():
         media_file_id VARCHAR(255)
     );
 
+    -- Create Expeditions table (for pirate expeditions) - MUST BE BEFORE Vendas
+    CREATE TABLE IF NOT EXISTS Expeditions (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(200) NOT NULL,
+        owner_chat_id BIGINT NOT NULL,
+        owner_user_id INTEGER,
+        owner_key TEXT,
+        admin_key TEXT,
+        encryption_version INTEGER DEFAULT 1,
+        anonymization_level VARCHAR(20) DEFAULT 'standard' CHECK (anonymization_level IN ('none', 'standard', 'enhanced', 'maximum')),
+        status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'completed', 'cancelled')),
+        deadline TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP,
+        description TEXT,
+        target_completion_date TIMESTAMP,
+        progress_notes TEXT
+    );
+
     -- Create Vendas table
     CREATE TABLE IF NOT EXISTS Vendas (
         id SERIAL PRIMARY KEY,
         comprador VARCHAR(100) NOT NULL,
-        data_venda TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        data_venda TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expedition_id INTEGER REFERENCES Expeditions(id) ON DELETE SET NULL
     );
 
     -- Create ItensVenda table
@@ -149,6 +169,113 @@ def initialize_schema():
         data_transacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
+
+    -- Create expedition_items table (for expedition inventory requirements)
+    CREATE TABLE IF NOT EXISTS expedition_items (
+        id SERIAL PRIMARY KEY,
+        expedition_id INTEGER REFERENCES Expeditions(id) ON DELETE CASCADE,
+        produto_id INTEGER REFERENCES Produtos(id),
+        encrypted_product_name TEXT,
+        anonymized_item_code VARCHAR(50),
+        quantity_required INTEGER NOT NULL,
+        quantity_consumed INTEGER DEFAULT 0,
+        target_unit_price DECIMAL(10,2),
+        actual_avg_price DECIMAL(10,2),
+        item_status VARCHAR(20) DEFAULT 'active' CHECK (item_status IN ('active', 'completed', 'cancelled', 'suspended')),
+        priority_level INTEGER DEFAULT 1 CHECK (priority_level BETWEEN 1 AND 5),
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Create pirate_names table (for anonymization system)
+    -- expedition_id can be NULL for global pirate mappings
+    CREATE TABLE IF NOT EXISTS pirate_names (
+        id SERIAL PRIMARY KEY,
+        expedition_id INTEGER REFERENCES Expeditions(id) ON DELETE CASCADE,
+        original_name VARCHAR(100) NOT NULL,
+        pirate_name VARCHAR(100) NOT NULL,
+        encrypted_mapping TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(expedition_id, original_name)
+    );
+
+    -- Create item_consumptions table (for tracking expedition item usage)
+    CREATE TABLE IF NOT EXISTS item_consumptions (
+        id SERIAL PRIMARY KEY,
+        expedition_id INTEGER REFERENCES Expeditions(id) ON DELETE CASCADE,
+        expedition_item_id INTEGER REFERENCES expedition_items(id) ON DELETE CASCADE,
+        consumer_name VARCHAR(100) NOT NULL,
+        pirate_name VARCHAR(100) NOT NULL,
+        quantity_consumed INTEGER NOT NULL,
+        unit_price DECIMAL(10,2) NOT NULL,
+        total_cost DECIMAL(10,2) NOT NULL,
+        amount_paid DECIMAL(10,2) DEFAULT 0.00 NOT NULL,
+        payment_status VARCHAR(20) DEFAULT 'pending' CHECK (payment_status IN ('pending', 'partial', 'paid')),
+        consumed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Create item_mappings table (for global custom item/product names)
+    CREATE TABLE IF NOT EXISTS item_mappings (
+        id SERIAL PRIMARY KEY,
+        product_name VARCHAR(100) NOT NULL UNIQUE,
+        custom_name VARCHAR(200) NOT NULL,
+        description TEXT,
+        is_fantasy_generated BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_by_chat_id BIGINT,
+        UNIQUE(custom_name)
+    );
+
+    -- Create expedition_pirates table (for managing expedition participants)
+    CREATE TABLE IF NOT EXISTS expedition_pirates (
+        id SERIAL PRIMARY KEY,
+        expedition_id INTEGER REFERENCES Expeditions(id) ON DELETE CASCADE,
+        pirate_name VARCHAR(100) NOT NULL,
+        original_name VARCHAR(100) NOT NULL,
+        chat_id BIGINT,
+        user_id INTEGER REFERENCES Usuarios(id),
+        encrypted_identity TEXT,
+        role VARCHAR(20) DEFAULT 'participant' CHECK (role IN ('participant', 'officer', 'captain')),
+        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'banned')),
+        UNIQUE(expedition_id, pirate_name),
+        UNIQUE(expedition_id, original_name)
+    );
+
+    -- Create expedition_assignments table (for consumption tracking and debt management)
+    CREATE TABLE IF NOT EXISTS expedition_assignments (
+        id SERIAL PRIMARY KEY,
+        expedition_id INTEGER REFERENCES Expeditions(id) ON DELETE CASCADE,
+        pirate_id INTEGER REFERENCES expedition_pirates(id) ON DELETE CASCADE,
+        expedition_item_id INTEGER REFERENCES expedition_items(id) ON DELETE CASCADE,
+        assigned_quantity INTEGER NOT NULL,
+        consumed_quantity INTEGER DEFAULT 0,
+        unit_price DECIMAL(10,2) NOT NULL,
+        total_cost DECIMAL(10,2) NOT NULL,
+        assignment_status VARCHAR(20) DEFAULT 'assigned' CHECK (assignment_status IN ('assigned', 'partial', 'completed', 'cancelled')),
+        payment_status VARCHAR(20) DEFAULT 'pending' CHECK (payment_status IN ('pending', 'paid', 'partial', 'overdue')),
+        assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP,
+        deadline TIMESTAMP
+    );
+
+    -- Create expedition_payments table (for detailed payment tracking)
+    CREATE TABLE IF NOT EXISTS expedition_payments (
+        id SERIAL PRIMARY KEY,
+        expedition_id INTEGER REFERENCES Expeditions(id) ON DELETE CASCADE,
+        assignment_id INTEGER REFERENCES expedition_assignments(id) ON DELETE CASCADE,
+        pirate_id INTEGER REFERENCES expedition_pirates(id) ON DELETE CASCADE,
+        payment_amount DECIMAL(10,2) NOT NULL,
+        payment_method VARCHAR(50),
+        payment_reference VARCHAR(100),
+        payment_status VARCHAR(20) DEFAULT 'completed' CHECK (payment_status IN ('pending', 'completed', 'failed', 'refunded')),
+        processed_by_chat_id BIGINT,
+        processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        notes TEXT
+    );
+
     -- Insert default configuration values
     INSERT INTO Configuracoes (chave, valor, descricao)
     VALUES ('frase_start', 'Bot inicializado com sucesso!', 'Mensagem exibida no comando /start')
@@ -164,9 +291,11 @@ def initialize_schema():
     CREATE INDEX IF NOT EXISTS idx_usuarios_username ON Usuarios(username);
     CREATE INDEX IF NOT EXISTS idx_vendas_comprador ON Vendas(comprador);
     CREATE INDEX IF NOT EXISTS idx_vendas_data ON Vendas(data_venda);
+    CREATE INDEX IF NOT EXISTS idx_vendas_expedition ON Vendas(expedition_id);
     CREATE INDEX IF NOT EXISTS idx_itensvenda_venda_id ON ItensVenda(venda_id);
     CREATE INDEX IF NOT EXISTS idx_itensvenda_produto_id ON ItensVenda(produto_id);
     CREATE INDEX IF NOT EXISTS idx_estoque_produto_id ON Estoque(produto_id);
+    CREATE INDEX IF NOT EXISTS idx_estoque_fifo ON Estoque(produto_id, data_adicao);
     CREATE INDEX IF NOT EXISTS idx_pagamentos_venda_id ON Pagamentos(venda_id);
     CREATE INDEX IF NOT EXISTS idx_smartcontracts_codigo ON SmartContracts(codigo);
     CREATE INDEX IF NOT EXISTS idx_transacoes_contract_id ON Transacoes(contract_id);
@@ -180,14 +309,301 @@ def initialize_schema():
     CREATE INDEX IF NOT EXISTS idx_cashtransactions_data ON CashTransactions(data_transacao);
     CREATE INDEX IF NOT EXISTS idx_cashtransactions_venda ON CashTransactions(venda_id);
     CREATE INDEX IF NOT EXISTS idx_cashtransactions_pagamento ON CashTransactions(pagamento_id);
+    CREATE INDEX IF NOT EXISTS idx_expeditions_owner ON Expeditions(owner_chat_id);
+    CREATE INDEX IF NOT EXISTS idx_expeditions_status ON Expeditions(status);
+    CREATE INDEX IF NOT EXISTS idx_expeditions_deadline ON Expeditions(deadline);
+    CREATE INDEX IF NOT EXISTS idx_expeditions_created ON Expeditions(created_at);
+    CREATE INDEX IF NOT EXISTS idx_expeditionitems_expedition ON expedition_items(expedition_id);
+    CREATE INDEX IF NOT EXISTS idx_expeditionitems_produto ON expedition_items(produto_id);
+    CREATE INDEX IF NOT EXISTS idx_piratenames_expedition ON pirate_names(expedition_id);
+    CREATE INDEX IF NOT EXISTS idx_piratenames_original ON pirate_names(original_name);
+    CREATE INDEX IF NOT EXISTS idx_itemconsumptions_expedition ON item_consumptions(expedition_id);
+    CREATE INDEX IF NOT EXISTS idx_itemconsumptions_expeditionitem ON item_consumptions(expedition_item_id);
+    CREATE INDEX IF NOT EXISTS idx_itemconsumptions_consumer ON item_consumptions(consumer_name);
+    CREATE INDEX IF NOT EXISTS idx_itemconsumptions_payment ON item_consumptions(payment_status);
+    CREATE INDEX IF NOT EXISTS idx_itemconsumptions_consumed ON item_consumptions(consumed_at);
+    CREATE INDEX IF NOT EXISTS idx_itemmappings_product_name ON item_mappings(product_name);
+    CREATE INDEX IF NOT EXISTS idx_itemmappings_custom_name ON item_mappings(custom_name);
+    CREATE INDEX IF NOT EXISTS idx_itemmappings_created_by ON item_mappings(created_by_chat_id);
+    CREATE INDEX IF NOT EXISTS idx_itemmappings_created_at ON item_mappings(created_at);
+
+    -- Advanced composite indexes for optimization
+    -- For export queries - status + created_at
+    CREATE INDEX IF NOT EXISTS idx_expeditions_status_created ON Expeditions(status, created_at DESC);
+    -- For owner dashboard - owner + status + created_at
+    CREATE INDEX IF NOT EXISTS idx_expeditions_owner_status_created ON Expeditions(owner_chat_id, status, created_at DESC);
+    -- For deadline monitoring - status + deadline
+    CREATE INDEX IF NOT EXISTS idx_expeditions_active_deadline ON Expeditions(status, deadline) WHERE status = 'active';
+    -- For expedition items with consumption tracking
+    CREATE INDEX IF NOT EXISTS idx_expeditionitems_expedition_consumed ON expedition_items(expedition_id, quantity_consumed);
+    -- For consumption reporting - expedition + consumer + consumed_at
+    CREATE INDEX IF NOT EXISTS idx_itemconsumptions_exp_consumer_date ON item_consumptions(expedition_id, consumer_name, consumed_at DESC);
+    -- For payment tracking - payment_status + consumed_at
+    CREATE INDEX IF NOT EXISTS idx_itemconsumptions_payment_date ON item_consumptions(payment_status, consumed_at DESC);
+    -- For profit analysis - expedition + payment_status + total_cost
+    CREATE INDEX IF NOT EXISTS idx_itemconsumptions_exp_payment_cost ON item_consumptions(expedition_id, payment_status, total_cost);
+    -- For search functionality - name pattern search
+    CREATE INDEX IF NOT EXISTS idx_expeditions_name_lower ON Expeditions(LOWER(name));
+    -- For pirate name lookups - expedition + original name
+    CREATE INDEX IF NOT EXISTS idx_piratenames_exp_original ON pirate_names(expedition_id, original_name);
+    -- For analytics queries - expedition items with products
+    CREATE INDEX IF NOT EXISTS idx_expeditionitems_produto_expedition ON expedition_items(produto_id, expedition_id);
+    -- For consumption analysis by time periods
+    CREATE INDEX IF NOT EXISTS idx_itemconsumptions_date_expedition ON item_consumptions(consumed_at DESC, expedition_id);
+
+    -- New indexes for expedition redesign tables
+    -- Expedition pirates indexes
+    CREATE INDEX IF NOT EXISTS idx_expeditionpirates_expedition ON expedition_pirates(expedition_id);
+    CREATE INDEX IF NOT EXISTS idx_expeditionpirates_original_name ON expedition_pirates(original_name);
+    CREATE INDEX IF NOT EXISTS idx_expeditionpirates_pirate_name ON expedition_pirates(pirate_name);
+    CREATE INDEX IF NOT EXISTS idx_expeditionpirates_chat_id ON expedition_pirates(chat_id);
+    CREATE INDEX IF NOT EXISTS idx_expeditionpirates_user_id ON expedition_pirates(user_id);
+    CREATE INDEX IF NOT EXISTS idx_expeditionpirates_status ON expedition_pirates(status);
+    CREATE INDEX IF NOT EXISTS idx_expeditionpirates_role ON expedition_pirates(role);
+    CREATE INDEX IF NOT EXISTS idx_expeditionpirates_joined ON expedition_pirates(joined_at DESC);
+
+    -- Expedition assignments indexes
+    CREATE INDEX IF NOT EXISTS idx_expeditionassignments_expedition ON expedition_assignments(expedition_id);
+    CREATE INDEX IF NOT EXISTS idx_expeditionassignments_pirate ON expedition_assignments(pirate_id);
+    CREATE INDEX IF NOT EXISTS idx_expeditionassignments_item ON expedition_assignments(expedition_item_id);
+    CREATE INDEX IF NOT EXISTS idx_expeditionassignments_assignment_status ON expedition_assignments(assignment_status);
+    CREATE INDEX IF NOT EXISTS idx_expeditionassignments_payment_status ON expedition_assignments(payment_status);
+    CREATE INDEX IF NOT EXISTS idx_expeditionassignments_assigned ON expedition_assignments(assigned_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_expeditionassignments_deadline ON expedition_assignments(deadline);
+    CREATE INDEX IF NOT EXISTS idx_expeditionassignments_completed ON expedition_assignments(completed_at);
+
+    -- Expedition payments indexes
+    CREATE INDEX IF NOT EXISTS idx_expeditionpayments_expedition ON expedition_payments(expedition_id);
+    CREATE INDEX IF NOT EXISTS idx_expeditionpayments_assignment ON expedition_payments(assignment_id);
+    CREATE INDEX IF NOT EXISTS idx_expeditionpayments_pirate ON expedition_payments(pirate_id);
+    CREATE INDEX IF NOT EXISTS idx_expeditionpayments_status ON expedition_payments(payment_status);
+    CREATE INDEX IF NOT EXISTS idx_expeditionpayments_processed ON expedition_payments(processed_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_expeditionpayments_method ON expedition_payments(payment_method);
+
+    -- Enhanced expedition table indexes for new fields
+    CREATE INDEX IF NOT EXISTS idx_expeditions_admin_key ON expeditions(admin_key);
+    CREATE INDEX IF NOT EXISTS idx_expeditions_anonymization_level ON expeditions(anonymization_level);
+    CREATE INDEX IF NOT EXISTS idx_expeditions_encryption_version ON expeditions(encryption_version);
+    CREATE INDEX IF NOT EXISTS idx_expeditions_target_completion ON expeditions(target_completion_date);
+
+    -- Enhanced expedition items indexes for new fields
+    CREATE INDEX IF NOT EXISTS idx_expeditionitems_anonymized_code ON expedition_items(anonymized_item_code);
+    CREATE INDEX IF NOT EXISTS idx_expeditionitems_item_status ON expedition_items(item_status);
+    CREATE INDEX IF NOT EXISTS idx_expeditionitems_priority ON expedition_items(priority_level);
+    CREATE INDEX IF NOT EXISTS idx_expeditionitems_updated ON expedition_items(updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_expeditionitems_target_price ON expedition_items(target_unit_price);
+
+    -- Composite indexes for complex queries
+    -- For assignment tracking by expedition and status
+    CREATE INDEX IF NOT EXISTS idx_expeditionassignments_exp_status_assigned ON expedition_assignments(expedition_id, assignment_status, assigned_at DESC);
+    -- For payment tracking by expedition and status
+    CREATE INDEX IF NOT EXISTS idx_expeditionpayments_exp_status_processed ON expedition_payments(expedition_id, payment_status, processed_at DESC);
+    -- For pirate management by expedition and status
+    CREATE INDEX IF NOT EXISTS idx_expeditionpirates_exp_status_joined ON expedition_pirates(expedition_id, status, joined_at DESC);
+    -- For overdue assignments monitoring
+    CREATE INDEX IF NOT EXISTS idx_expeditionassignments_overdue ON expedition_assignments(assignment_status, deadline) WHERE assignment_status != 'completed' AND deadline IS NOT NULL;
+    -- For financial analytics by expedition and payment status
+    CREATE INDEX IF NOT EXISTS idx_expeditionassignments_exp_payment_cost ON expedition_assignments(expedition_id, payment_status, total_cost);
+    -- For user activity tracking
+    CREATE INDEX IF NOT EXISTS idx_expeditionpirates_user_activity ON expedition_pirates(user_id, status, joined_at DESC);
+    -- For assignment deadlines and completion tracking
+    CREATE INDEX IF NOT EXISTS idx_expeditionassignments_deadline_status ON expedition_assignments(deadline ASC, assignment_status) WHERE deadline IS NOT NULL;
+
+    -- Additional performance indexes for common query patterns (Quick Win optimization)
+    -- For expedition status filtering with owner (dashboard queries)
+    CREATE INDEX IF NOT EXISTS idx_expeditions_status_owner_created ON Expeditions(status, owner_chat_id, created_at DESC);
+    -- For consumption queries with payment status (financial reports)
+    CREATE INDEX IF NOT EXISTS idx_consumptions_expedition_payment_consumed ON item_consumptions(expedition_id, payment_status, consumed_at DESC);
+    -- For sales by expedition and buyer (debt tracking)
+    CREATE INDEX IF NOT EXISTS idx_vendas_expedition_buyer ON Vendas(expedition_id, comprador) WHERE expedition_id IS NOT NULL;
+    -- For unpaid sales lookup optimization
+    CREATE INDEX IF NOT EXISTS idx_vendas_buyer_date ON Vendas(comprador, data_venda DESC);
     """
     
     try:
         with db_manager.get_connection() as conn:
             with conn.cursor() as cursor:
+                # First, handle migration for existing vendas table
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'vendas' AND column_name = 'expedition_id'")
+                if not cursor.fetchone():
+                    logger.info("Adding expedition_id column to existing vendas table")
+                    cursor.execute("ALTER TABLE vendas ADD COLUMN expedition_id INTEGER REFERENCES Expeditions(id) ON DELETE SET NULL")
+                    logger.info("Added expedition_id column successfully")
+
+                # Handle migration for existing expeditions table
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expeditions' AND column_name = 'owner_key'")
+                if not cursor.fetchone():
+                    logger.info("Adding owner_key column to existing expeditions table")
+                    cursor.execute("ALTER TABLE expeditions ADD COLUMN owner_key TEXT")
+                    logger.info("Added owner_key column successfully")
+
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expeditions' AND column_name = 'owner_user_id'")
+                if not cursor.fetchone():
+                    logger.info("Adding owner_user_id column to existing expeditions table")
+                    cursor.execute("ALTER TABLE expeditions ADD COLUMN owner_user_id INTEGER")
+                    logger.info("Added owner_user_id column successfully")
+
+                # Handle migration for new dual encryption fields
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expeditions' AND column_name = 'admin_key'")
+                if not cursor.fetchone():
+                    logger.info("Adding admin_key column to existing expeditions table")
+                    cursor.execute("ALTER TABLE expeditions ADD COLUMN admin_key TEXT")
+                    logger.info("Added admin_key column successfully")
+
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expeditions' AND column_name = 'encryption_version'")
+                if not cursor.fetchone():
+                    logger.info("Adding encryption_version column to existing expeditions table")
+                    cursor.execute("ALTER TABLE expeditions ADD COLUMN encryption_version INTEGER DEFAULT 1")
+                    logger.info("Added encryption_version column successfully")
+
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expeditions' AND column_name = 'anonymization_level'")
+                if not cursor.fetchone():
+                    logger.info("Adding anonymization_level column to existing expeditions table")
+                    cursor.execute("ALTER TABLE expeditions ADD COLUMN anonymization_level VARCHAR(20) DEFAULT 'standard' CHECK (anonymization_level IN ('none', 'standard', 'enhanced', 'maximum'))")
+                    logger.info("Added anonymization_level column successfully")
+
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expeditions' AND column_name = 'description'")
+                if not cursor.fetchone():
+                    logger.info("Adding description column to existing expeditions table")
+                    cursor.execute("ALTER TABLE expeditions ADD COLUMN description TEXT")
+                    logger.info("Added description column successfully")
+
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expeditions' AND column_name = 'target_completion_date'")
+                if not cursor.fetchone():
+                    logger.info("Adding target_completion_date column to existing expeditions table")
+                    cursor.execute("ALTER TABLE expeditions ADD COLUMN target_completion_date TIMESTAMP")
+                    logger.info("Added target_completion_date column successfully")
+
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expeditions' AND column_name = 'progress_notes'")
+                if not cursor.fetchone():
+                    logger.info("Adding progress_notes column to existing expeditions table")
+                    cursor.execute("ALTER TABLE expeditions ADD COLUMN progress_notes TEXT")
+                    logger.info("Added progress_notes column successfully")
+
+                # Handle migration for existing expedition_items table
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expedition_items' AND column_name = 'encrypted_product_name'")
+                if not cursor.fetchone():
+                    logger.info("Adding encrypted_product_name column to existing expedition_items table")
+                    cursor.execute("ALTER TABLE expedition_items ADD COLUMN encrypted_product_name TEXT")
+                    logger.info("Added encrypted_product_name column successfully")
+
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expedition_items' AND column_name = 'anonymized_item_code'")
+                if not cursor.fetchone():
+                    logger.info("Adding anonymized_item_code column to existing expedition_items table")
+                    cursor.execute("ALTER TABLE expedition_items ADD COLUMN anonymized_item_code VARCHAR(50)")
+                    logger.info("Added anonymized_item_code column successfully")
+
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expedition_items' AND column_name = 'target_unit_price'")
+                if not cursor.fetchone():
+                    logger.info("Adding target_unit_price column to existing expedition_items table")
+                    cursor.execute("ALTER TABLE expedition_items ADD COLUMN target_unit_price DECIMAL(10,2)")
+                    logger.info("Added target_unit_price column successfully")
+
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expedition_items' AND column_name = 'actual_avg_price'")
+                if not cursor.fetchone():
+                    logger.info("Adding actual_avg_price column to existing expedition_items table")
+                    cursor.execute("ALTER TABLE expedition_items ADD COLUMN actual_avg_price DECIMAL(10,2)")
+                    logger.info("Added actual_avg_price column successfully")
+
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expedition_items' AND column_name = 'item_status'")
+                if not cursor.fetchone():
+                    logger.info("Adding item_status column to existing expedition_items table")
+                    cursor.execute("ALTER TABLE expedition_items ADD COLUMN item_status VARCHAR(20) DEFAULT 'active' CHECK (item_status IN ('active', 'completed', 'cancelled', 'suspended'))")
+                    logger.info("Added item_status column successfully")
+
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expedition_items' AND column_name = 'priority_level'")
+                if not cursor.fetchone():
+                    logger.info("Adding priority_level column to existing expedition_items table")
+                    cursor.execute("ALTER TABLE expedition_items ADD COLUMN priority_level INTEGER DEFAULT 1 CHECK (priority_level BETWEEN 1 AND 5)")
+                    logger.info("Added priority_level column successfully")
+
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expedition_items' AND column_name = 'notes'")
+                if not cursor.fetchone():
+                    logger.info("Adding notes column to existing expedition_items table")
+                    cursor.execute("ALTER TABLE expedition_items ADD COLUMN notes TEXT")
+                    logger.info("Added notes column successfully")
+
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expedition_items' AND column_name = 'updated_at'")
+                if not cursor.fetchone():
+                    logger.info("Adding updated_at column to existing expedition_items table")
+                    cursor.execute("ALTER TABLE expedition_items ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+                    logger.info("Added updated_at column successfully")
+
+                # Handle migration for item_consumptions table payment tracking
+                # First check if the table exists
+                cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_name = 'item_consumptions'")
+                if cursor.fetchone():
+                    cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'item_consumptions' AND column_name = 'amount_paid'")
+                    if not cursor.fetchone():
+                        logger.info("Adding amount_paid column to existing item_consumptions table")
+                        cursor.execute("ALTER TABLE item_consumptions ADD COLUMN amount_paid DECIMAL(10,2) DEFAULT 0.00 NOT NULL")
+                        logger.info("Added amount_paid column successfully")
+
+                # Check if pirate_names table exists and needs migration for global mappings
+                cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_name = 'pirate_names'")
+                if cursor.fetchone():
+                    # Check if we need to modify the constraint to allow NULL expedition_id for global mappings
+                    cursor.execute("""
+                        SELECT constraint_name FROM information_schema.table_constraints
+                        WHERE table_name = 'pirate_names' AND constraint_type = 'FOREIGN KEY'
+                        AND constraint_name LIKE '%expedition_id%'
+                    """)
+                    fk_constraint = cursor.fetchone()
+                    if fk_constraint:
+                        constraint_name = fk_constraint[0]
+                        logger.info(f"Modifying pirate_names table to allow NULL expedition_id for global mappings")
+                        # First, drop the existing foreign key constraint
+                        cursor.execute(f"ALTER TABLE pirate_names DROP CONSTRAINT IF EXISTS {constraint_name}")
+                        # Add the new constraint that allows NULL values
+                        cursor.execute("ALTER TABLE pirate_names ADD CONSTRAINT pirate_names_expedition_id_fkey FOREIGN KEY (expedition_id) REFERENCES Expeditions(id) ON DELETE CASCADE")
+                        logger.info("Successfully updated pirate_names foreign key constraint to allow NULL values")
+
+                # Migrate existing global item mappings from pirate_names to item_mappings table
+                cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_name = 'item_mappings'")
+                if not cursor.fetchone():
+                    logger.info("Creating item_mappings table and migrating data from pirate_names")
+                    # The table will be created by the main SQL script below
+                    # We'll migrate data after the table is created
+                else:
+                    # Check if migration is needed
+                    cursor.execute("SELECT COUNT(*) FROM item_mappings")
+                    mappings_count = cursor.fetchone()[0]
+                    if mappings_count == 0:
+                        logger.info("Migrating existing global item mappings from pirate_names to item_mappings")
+                        cursor.execute("""
+                            INSERT INTO item_mappings (product_name, custom_name, is_fantasy_generated, created_at)
+                            SELECT original_name, pirate_name, TRUE, created_at
+                            FROM pirate_names
+                            WHERE expedition_id IS NULL
+                            ON CONFLICT (product_name) DO NOTHING
+                        """)
+                        logger.info("Successfully migrated global item mappings to item_mappings table")
+
+                # Now create/update all tables
                 cursor.execute(create_tables_sql)
+
+                # After tables are created, perform data migration if needed
+                cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_name = 'item_mappings'")
+                if cursor.fetchone():
+                    cursor.execute("SELECT COUNT(*) FROM item_mappings")
+                    mappings_count = cursor.fetchone()[0]
+                    if mappings_count == 0:
+                        # Check if there are global mappings in pirate_names to migrate
+                        cursor.execute("SELECT COUNT(*) FROM pirate_names WHERE expedition_id IS NULL")
+                        pirate_mappings_count = cursor.fetchone()[0]
+                        if pirate_mappings_count > 0:
+                            logger.info(f"Migrating {pirate_mappings_count} global item mappings from pirate_names to item_mappings")
+                            cursor.execute("""
+                                INSERT INTO item_mappings (product_name, custom_name, is_fantasy_generated, created_at)
+                                SELECT original_name, pirate_name, TRUE, created_at
+                                FROM pirate_names
+                                WHERE expedition_id IS NULL
+                                ON CONFLICT (product_name) DO NOTHING
+                            """)
+                            logger.info("Successfully migrated global item mappings to item_mappings table")
+
                 conn.commit()
-        
+
         logger.info("Database schema initialized successfully")
         
     except Exception as e:
@@ -206,7 +622,10 @@ def health_check_schema() -> dict:
         'usuarios', 'produtos', 'vendas', 'itensvenda',
         'estoque', 'pagamentos', 'smartcontracts',
         'transacoes', 'configuracoes', 'broadcastmessages',
-        'pollanswers', 'cashbalance', 'cashtransactions'
+        'pollanswers', 'cashbalance', 'cashtransactions',
+        'expeditions', 'expedition_items', 'pirate_names', 'item_consumptions',
+        'expedition_pirates', 'expedition_assignments', 'expedition_payments',
+        'item_mappings'
     ]
     
     db_manager = get_db_manager()

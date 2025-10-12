@@ -69,6 +69,8 @@ All handlers use modern architecture with full migration completed:
 - `login_handler.py`: User authentication with type-safe forms
 - `product_handler.py`: Product CRUD with error boundaries
 - `buy_handler.py`: Purchase flow with inventory validation
+- `enhanced_buy_handler.py`: Enhanced purchase flow with expedition integration
+- `expedition_handler.py`: Expedition management with conversation flows
 - `user_handler.py`: User management with input sanitization
 - `estoque_handler.py`: Inventory management with FIFO processing
 - `commands_handler.py`: Dynamic command listing
@@ -91,7 +93,12 @@ The service layer implements repository pattern with dependency injection:
 - `services/base_service.py`: Base service with connection management and transactions
 - `services/user_service.py`: User authentication and management with security
 - `services/product_service.py`: Product operations with inventory integration
-- `services/sales_service.py`: Sales transactions with FIFO consumption
+- `services/sales_service.py`: Sales transactions with FIFO consumption and expedition integration
+- `services/expedition_service.py`: Expedition management with progress tracking and analytics
+- `services/brambler_service.py`: Secure pirate name generation and encryption
+- `services/export_service.py`: Data export with CSV generation and filtering
+- `services/websocket_service.py`: Real-time updates and notifications
+- `services/analytics_service.py`: Expedition performance metrics and reporting
 - `services/smartcontract_service.py`: Smart contract and transaction management
 - `services/handler_business_service.py`: High-level business logic coordinator
 - `services/config_service.py`: Configuration management service
@@ -108,7 +115,7 @@ The service layer implements repository pattern with dependency injection:
 - **PostgreSQL** with connection pooling
 - **Schema management**: `database/schema.py` with comprehensive table structure
 - **Migration support**: Clean initialization and upgrades
-- **Tables**: Usuarios, Produtos, Vendas, ItensVenda, Estoque, Pagamentos, SmartContracts, Transacoes, Configuracoes
+- **Tables**: Usuarios, Produtos, Vendas, ItensVenda, Estoque, Pagamentos, SmartContracts, Transacoes, Configuracoes, Expeditions, Expedition_Items, Pirate_Names, Item_Consumptions
 
 ### Permission System
 - Three-tier access control: 'user', 'admin', 'owner'
@@ -145,6 +152,7 @@ Features:
 
 **Admin Level (includes user commands):**
 - `/buy` - Purchase flow with inventory validation and FIFO processing
+- `/expedition` - Expedition management with timeline tracking and progress monitoring
 - `/estoque` - Inventory management with batch operations
 - `/pagar` - Payment processing with debt tracking
 - `/lista_produtos` - Product catalog with media display
@@ -217,6 +225,18 @@ Features:
 - **CSV Export:** Personal debt export with filename `minhas_dividas_{username}.csv`
 - **Auto-Cleanup:** Message auto-deletes after 30 seconds
 
+#### Expedition Management (`/expedition`) - Admin+
+**States:** `EXPEDITION_MENU` → `EXPEDITION_CREATE_NAME` → `EXPEDITION_CREATE_DESCRIPTION` → `EXPEDITION_CREATE_DEADLINE` → `EXPEDITION_ADD_ITEMS`
+- **Create Expedition:** Name → Description → Deadline (days) → Add items with target prices
+- **List Expeditions:** View all expeditions with status and progress
+- **Expedition Status:** Detailed view with timeline, items, consumption progress
+- **Item Management:** Add/remove items from active expeditions
+- **Progress Tracking:** Real-time consumption monitoring and deadline alerts
+- **Pirate Names:** Secure anonymized name generation with owner-only decryption
+- **Export Features:** CSV export of expedition data, progress reports, profit/loss analysis
+- **Owner Access:** Full expedition management and encrypted name revelation
+- **Admin Access:** View expeditions, track progress, consume items
+
 ### Advanced Features
 
 **Message Management:**
@@ -229,12 +249,18 @@ Features:
 - Rate limiting and flood protection
 - Secure credential handling
 - Permission-based access control
+- AES-GCM encryption for pirate name anonymization
+- Owner key generation with PBKDF2 key derivation
+- Secure expedition ownership validation
 
 **Data Processing:**
 - FIFO inventory consumption
 - Complex debt calculations
 - Media file preservation
 - CSV generation with proper cleanup
+- Real-time expedition progress tracking
+- Advanced analytics and profit/loss calculations
+- Query optimization with caching and indexing
 
 ## Deployment
 

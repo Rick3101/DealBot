@@ -1,12 +1,21 @@
 services:
   - type: web
-    name: dealbot-docker
-    env: python
+    name: dealbot-webapp
+    runtime: python
     plan: free
     region: oregon
-    buildCommand: ""
-    startCommand: python app.py
-    dockerfilePath: ./Dockerfile
+    buildCommand: |
+      pip install -r requirements.txt
+      cd webapp && npm install && npm run build
+    startCommand: gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:$PORT wsgi:app --timeout 120 --log-level info
     envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: PYTHON_VERSION
+        value: 3.10.0
       - key: BOT_TOKEN
-        sync: false  # você vai definir isso no painel do Render depois
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: RAILWAY_URL
+        sync: false

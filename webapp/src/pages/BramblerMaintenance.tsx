@@ -3,11 +3,15 @@ import styled from 'styled-components';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CaptainLayout } from '@/layouts/CaptainLayout';
 import { PirateButton } from '@/components/ui/PirateButton';
+import { WarningBanner } from '@/components/ui/WarningBanner';
+import { Modal } from '@/components/ui/Modal';
+import { FormGroup, Input, Select, EditInput } from '@/components/ui/FormElements';
+import { LoadingOverlay } from '@/components/ui/LoadingOverlay';
 import { pirateColors, spacing, pirateTypography } from '@/utils/pirateTheme';
 import { hapticFeedback } from '@/utils/telegram';
 import { bramblerService, type BramblerMaintenanceItem } from '@/services/api/bramblerService';
 import { expeditionService } from '@/services/api/expeditionService';
-import { Eye, EyeOff, Key, Edit2, Save, X, AlertTriangle, Plus, Users } from 'lucide-react';
+import { Eye, EyeOff, Key, Edit2, Save, X, Plus, Users } from 'lucide-react';
 import type { Expedition } from '@/types/expedition';
 
 interface MaintenanceState {
@@ -77,24 +81,6 @@ const ViewToggle = styled.div`
   gap: ${spacing.md};
 `;
 
-const WarningBanner = styled(motion.div)`
-  background: linear-gradient(135deg, ${pirateColors.warning}20, ${pirateColors.danger}10);
-  border: 2px solid ${pirateColors.warning};
-  border-radius: 12px;
-  padding: ${spacing.md};
-  margin-bottom: ${spacing.md};
-  display: flex;
-  align-items: center;
-  gap: ${spacing.md};
-`;
-
-const WarningText = styled.p`
-  color: ${pirateColors.muted};
-  margin: 0;
-  font-size: ${pirateTypography.sizes.sm};
-  line-height: 1.5;
-`;
-
 const PiratesTable = styled.div`
   background: ${pirateColors.white};
   border-radius: 12px;
@@ -146,25 +132,6 @@ const PirateNameDisplay = styled.div<{ $showingOriginal?: boolean }>`
   font-weight: ${pirateTypography.weights.bold};
 `;
 
-const EditInput = styled.input`
-  padding: ${spacing.sm} ${spacing.md};
-  border: 2px solid ${pirateColors.lightGold};
-  border-radius: 8px;
-  font-family: ${pirateTypography.body};
-  font-size: ${pirateTypography.sizes.sm};
-  background: ${pirateColors.white};
-  color: ${pirateColors.primary};
-  width: 100%;
-  max-width: 300px;
-  transition: all 0.3s ease;
-
-  &:focus {
-    outline: none;
-    border-color: ${pirateColors.secondary};
-    box-shadow: 0 0 0 3px rgba(218, 165, 32, 0.1);
-  }
-`;
-
 const ActionButtons = styled.div`
   display: flex;
   gap: ${spacing.xs};
@@ -191,113 +158,6 @@ const EmptyTitle = styled.h3`
   font-family: ${pirateTypography.headings};
   color: ${pirateColors.primary};
   margin-bottom: ${spacing.sm};
-`;
-
-const Modal = styled(motion.div)`
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  padding: ${spacing.lg};
-`;
-
-const ModalContent = styled(motion.div)`
-  background: ${pirateColors.white};
-  border-radius: 16px;
-  padding: ${spacing['2xl']};
-  max-width: 500px;
-  width: 100%;
-  box-shadow: 0 20px 60px rgba(139, 69, 19, 0.3);
-`;
-
-const ModalHeader = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: ${spacing.xl};
-`;
-
-const ModalTitle = styled.h2`
-  font-family: ${pirateTypography.headings};
-  color: ${pirateColors.primary};
-  font-size: ${pirateTypography.sizes['2xl']};
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: ${spacing.sm};
-`;
-
-const FormGroup = styled.div`
-  margin-bottom: ${spacing.lg};
-`;
-
-const Label = styled.label`
-  display: block;
-  color: ${pirateColors.primary};
-  font-weight: ${pirateTypography.weights.bold};
-  margin-bottom: ${spacing.sm};
-  font-size: ${pirateTypography.sizes.sm};
-`;
-
-const Input = styled.input`
-  width: 100%;
-  padding: ${spacing.md};
-  border: 2px solid ${pirateColors.lightGold};
-  border-radius: 8px;
-  font-family: ${pirateTypography.body};
-  font-size: ${pirateTypography.sizes.base};
-  background: ${pirateColors.white};
-  color: ${pirateColors.primary};
-  transition: all 0.3s ease;
-
-  &:focus {
-    outline: none;
-    border-color: ${pirateColors.secondary};
-    box-shadow: 0 0 0 3px rgba(218, 165, 32, 0.1);
-  }
-
-  &::placeholder {
-    color: ${pirateColors.muted};
-  }
-`;
-
-const Select = styled.select`
-  width: 100%;
-  padding: ${spacing.md};
-  border: 2px solid ${pirateColors.lightGold};
-  border-radius: 8px;
-  font-family: ${pirateTypography.body};
-  font-size: ${pirateTypography.sizes.base};
-  background: ${pirateColors.white};
-  color: ${pirateColors.primary};
-  transition: all 0.3s ease;
-  cursor: pointer;
-
-  &:focus {
-    outline: none;
-    border-color: ${pirateColors.secondary};
-    box-shadow: 0 0 0 3px rgba(218, 165, 32, 0.1);
-  }
-`;
-
-const HelpText = styled.p`
-  color: ${pirateColors.muted};
-  font-size: ${pirateTypography.sizes.xs};
-  margin-top: ${spacing.xs};
-  margin-bottom: 0;
-`;
-
-const ModalActions = styled.div`
-  display: flex;
-  gap: ${spacing.md};
-  justify-content: flex-end;
-  margin-top: ${spacing.xl};
 `;
 
 export const BramblerMaintenance: React.FC = () => {
@@ -498,23 +358,10 @@ export const BramblerMaintenance: React.FC = () => {
     }
   };
 
-  if (state.loading) {
-    return (
-      <CaptainLayout
-        title="Brambler Maintenance"
-        subtitle="Manage all pirate names across expeditions"
-      >
-        <MaintenanceContainer>
-          <EmptyState>
-            <EmptyIcon>🎭</EmptyIcon>
-            <EmptyTitle>Loading pirate names...</EmptyTitle>
-          </EmptyState>
-        </MaintenanceContainer>
-      </CaptainLayout>
-    );
-  }
-
   return (
+    <>
+      <LoadingOverlay show={state.loading} message="Loading pirate names..." />
+
     <CaptainLayout
       title="Brambler Maintenance"
       subtitle="Manage all pirate names across expeditions"
@@ -532,15 +379,9 @@ export const BramblerMaintenance: React.FC = () => {
 
         {state.showOriginalNames && (
           <WarningBanner
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-          >
-            <AlertTriangle size={20} color={pirateColors.warning} />
-            <WarningText>
-              Original names are currently visible. Make sure you're in a secure environment.
-            </WarningText>
-          </WarningBanner>
+            type="warning"
+            message="Original names are currently visible. Make sure you're in a secure environment."
+          />
         )}
 
         <ControlsSection>
@@ -571,13 +412,9 @@ export const BramblerMaintenance: React.FC = () => {
 
         {state.error && (
           <WarningBanner
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-          >
-            <AlertTriangle size={20} color={pirateColors.warning} />
-            <WarningText>{state.error}</WarningText>
-          </WarningBanner>
+            type="error"
+            message={state.error}
+          />
         )}
 
         {state.pirates.length === 0 ? (
@@ -680,127 +517,107 @@ export const BramblerMaintenance: React.FC = () => {
         )}
 
         {/* Create Pirate Modal */}
-        <AnimatePresence>
-          {state.showCreateModal && (
-            <Modal
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={handleCloseCreateModal}
-            >
-              <ModalContent
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.9, opacity: 0 }}
-                onClick={(e) => e.stopPropagation()}
+        <Modal
+          isOpen={state.showCreateModal}
+          onClose={handleCloseCreateModal}
+          title="Create New Pirate"
+          titleIcon={<Users size={24} />}
+          footer={
+            <>
+              <PirateButton
+                variant="secondary"
+                onClick={handleCloseCreateModal}
+                disabled={state.creating}
               >
-                <ModalHeader>
-                  <ModalTitle>
-                    <Users size={24} />
-                    Create New Pirate
-                  </ModalTitle>
-                  <PirateButton
-                    size="sm"
-                    variant="outline"
-                    onClick={handleCloseCreateModal}
-                  >
-                    <X size={16} />
-                  </PirateButton>
-                </ModalHeader>
+                Cancel
+              </PirateButton>
+              <PirateButton
+                variant="primary"
+                onClick={handleCreatePirate}
+                disabled={state.creating}
+              >
+                {state.creating ? 'Creating...' : 'Create Pirate'}
+              </PirateButton>
+            </>
+          }
+        >
+          <FormGroup
+            label="Expedition"
+            htmlFor="expedition"
+            required
+            helpText="Choose which expedition this pirate will join"
+          >
+            <Select
+              id="expedition"
+              value={state.createForm.expedition_id || ''}
+              onChange={(e) => setState(prev => ({
+                ...prev,
+                createForm: {
+                  ...prev.createForm,
+                  expedition_id: e.target.value ? parseInt(e.target.value) : null
+                }
+              }))}
+            >
+              <option value="">Select an expedition...</option>
+              {state.expeditions.map(exp => (
+                <option key={exp.id} value={exp.id}>
+                  {exp.name}
+                </option>
+              ))}
+            </Select>
+          </FormGroup>
 
-                <FormGroup>
-                  <Label htmlFor="expedition">Expedition *</Label>
-                  <Select
-                    id="expedition"
-                    value={state.createForm.expedition_id || ''}
-                    onChange={(e) => setState(prev => ({
-                      ...prev,
-                      createForm: {
-                        ...prev.createForm,
-                        expedition_id: e.target.value ? parseInt(e.target.value) : null
-                      }
-                    }))}
-                  >
-                    <option value="">Select an expedition...</option>
-                    {state.expeditions.map(exp => (
-                      <option key={exp.id} value={exp.id}>
-                        {exp.name}
-                      </option>
-                    ))}
-                  </Select>
-                  <HelpText>Choose which expedition this pirate will join</HelpText>
-                </FormGroup>
+          <FormGroup
+            label="Original Name"
+            htmlFor="original_name"
+            required
+            helpText="The actual name of the buyer/consumer (required)"
+          >
+            <Input
+              id="original_name"
+              type="text"
+              placeholder="Enter the real buyer/consumer name"
+              value={state.createForm.original_name}
+              onChange={(e) => setState(prev => ({
+                ...prev,
+                createForm: {
+                  ...prev.createForm,
+                  original_name: e.target.value
+                }
+              }))}
+            />
+          </FormGroup>
 
-                <FormGroup>
-                  <Label htmlFor="original_name">Original Name *</Label>
-                  <Input
-                    id="original_name"
-                    type="text"
-                    placeholder="Enter the real buyer/consumer name"
-                    value={state.createForm.original_name}
-                    onChange={(e) => setState(prev => ({
-                      ...prev,
-                      createForm: {
-                        ...prev.createForm,
-                        original_name: e.target.value
-                      }
-                    }))}
-                  />
-                  <HelpText>The actual name of the buyer/consumer (required)</HelpText>
-                </FormGroup>
+          <FormGroup
+            label="Pirate Name (Optional)"
+            htmlFor="pirate_name"
+            helpText="Leave blank to auto-generate, or enter a custom pirate name"
+          >
+            <Input
+              id="pirate_name"
+              type="text"
+              placeholder="Leave empty for auto-generated name"
+              value={state.createForm.pirate_name}
+              onChange={(e) => setState(prev => ({
+                ...prev,
+                createForm: {
+                  ...prev.createForm,
+                  pirate_name: e.target.value
+                }
+              }))}
+            />
+          </FormGroup>
 
-                <FormGroup>
-                  <Label htmlFor="pirate_name">Pirate Name (Optional)</Label>
-                  <Input
-                    id="pirate_name"
-                    type="text"
-                    placeholder="Leave empty for auto-generated name"
-                    value={state.createForm.pirate_name}
-                    onChange={(e) => setState(prev => ({
-                      ...prev,
-                      createForm: {
-                        ...prev.createForm,
-                        pirate_name: e.target.value
-                      }
-                    }))}
-                  />
-                  <HelpText>
-                    Leave blank to auto-generate, or enter a custom pirate name
-                  </HelpText>
-                </FormGroup>
-
-                {state.error && (
-                  <WarningBanner
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    style={{ marginBottom: spacing.lg }}
-                  >
-                    <AlertTriangle size={16} color={pirateColors.warning} />
-                    <WarningText>{state.error}</WarningText>
-                  </WarningBanner>
-                )}
-
-                <ModalActions>
-                  <PirateButton
-                    variant="secondary"
-                    onClick={handleCloseCreateModal}
-                    disabled={state.creating}
-                  >
-                    Cancel
-                  </PirateButton>
-                  <PirateButton
-                    variant="primary"
-                    onClick={handleCreatePirate}
-                    disabled={state.creating}
-                  >
-                    {state.creating ? 'Creating...' : 'Create Pirate'}
-                  </PirateButton>
-                </ModalActions>
-              </ModalContent>
-            </Modal>
+          {state.error && (
+            <WarningBanner
+              type="error"
+              message={state.error}
+              style={{ marginBottom: spacing.lg }}
+            />
           )}
-        </AnimatePresence>
+        </Modal>
       </MaintenanceContainer>
     </CaptainLayout>
+    </>
   );
 };

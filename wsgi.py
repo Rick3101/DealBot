@@ -31,23 +31,19 @@ try:
     bot_application.initialize_services()
     logger.info("Services initialized successfully")
 
-    # Create Flask app
-    bot_application.create_flask_app()
+    # Create Flask app (this also configures routes and SocketIO)
+    app = bot_application.create_flask_app()
     logger.info("Flask app created successfully")
 
-    # Setup routes (including webapp serving)
-    bot_application.setup_routes()
-    logger.info("Routes configured successfully")
+    # Initialize bot (handlers, webhook, etc.)
+    bot_application.initialize_bot()
+    logger.info("Bot initialized successfully")
 
-    # Setup bot (handlers, webhook, etc.)
-    bot_application.setup_bot()
-    logger.info("Bot configured successfully")
-
-    # Get the Flask app instance for gunicorn
-    app = bot_application.flask_app
+    # Get the SocketIO instance
     socketio = bot_application.socketio
 
     logger.info("Application ready for production deployment")
+    logger.info(f"Webhook URL configured: {bot_application.config.telegram.webhook_url}")
 
     # Note: We expose both 'app' and 'socketio' but gunicorn will use 'app'
     # The socketio functionality is integrated into the Flask app

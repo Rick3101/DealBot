@@ -576,6 +576,9 @@ class BotApplication:
 
                 if request.method == "GET":
                     # Check authentication - require owner permission for full list
+                    import time
+                    start_time = time.time()
+
                     chat_id = request.headers.get('X-Chat-ID')
                     if not chat_id:
                         return jsonify({"error": "Authentication required"}), 401
@@ -588,15 +591,23 @@ class BotApplication:
                     except (ValueError, TypeError):
                         return jsonify({"error": "Invalid chat ID"}), 400
 
+                    # OPTIMIZATION: Get pagination parameters (default limit 50)
+                    limit = min(int(request.args.get('limit', 50)), 500)
+                    offset = int(request.args.get('offset', 0))
+
                     # Get expeditions based on permission level
+                    self.logger.info(f"Fetching expeditions for user {chat_id} (level: {user_level.value})")
                     if user_level.value in ['owner', 'admin']:
                         expeditions = expedition_service.get_all_expeditions()
                     else:
                         expeditions = expedition_service.get_expeditions_by_owner(chat_id)
 
+                    # Apply pagination
+                    paginated_expeditions = expeditions[offset:offset+limit]
+
                     # Convert to response format
                     expeditions_data = []
-                    for exp in expeditions:
+                    for exp in paginated_expeditions:
                         expeditions_data.append({
                             "id": exp.id,
                             "name": exp.name,
@@ -607,7 +618,17 @@ class BotApplication:
                             "completed_at": exp.completed_at.isoformat() if exp.completed_at else None
                         })
 
-                    return jsonify({"expeditions": expeditions_data})
+                    elapsed = time.time() - start_time
+                    self.logger.info(f"Expeditions GET completed in {elapsed:.3f}s")
+
+                    return jsonify({
+                        "expeditions": expeditions_data,
+                        "total_count": len(expeditions),
+                        "returned_count": len(expeditions_data),
+                        "limit": limit,
+                        "offset": offset,
+                        "response_time_ms": int(elapsed * 1000)
+                    })
 
                 elif request.method == "POST":
                     # Create new expedition - require owner permission
@@ -730,6 +751,7 @@ class BotApplication:
                             {
                                 "id": consumption.id,
                                 "consumer_name": consumption.consumer_name,
+                                "pirate_name": consumption.pirate_name,
                                 "product_name": consumption.product_name,
                                 "quantity": consumption.quantity,
                                 "unit_price": float(consumption.unit_price),
@@ -1107,7 +1129,10 @@ class BotApplication:
 
         @app.route("/api/brambler/decrypt/<int:expedition_id>", methods=["POST"])
         def api_brambler_decrypt(expedition_id: int):
-            """API endpoint for decrypting pirate names (owner access only)."""
+            """
+            API endpoint for decrypting pirate names (owner access only).
+            Supports FULL ENCRYPTION MODE - decrypts all expedition pirates at once.
+            """
             try:
                 from core.modern_service_container import get_expedition_service, get_brambler_service, get_user_service
 
@@ -1141,23 +1166,224 @@ class BotApplication:
                 if not data:
                     return jsonify({"error": "Request body required"}), 400
 
-                encrypted_mapping = data.get('encrypted_mapping')
                 owner_key = data.get('owner_key')
+                if not owner_key:
+                    return jsonify({"error": "owner_key is required"}), 400
 
-                if not encrypted_mapping or not owner_key:
-                    return jsonify({"error": "encrypted_mapping and owner_key are required"}), 400
+                # Decrypt ALL pirate names for this expedition
+                decrypted_mappings = brambler_service.decrypt_expedition_pirates(expedition_id, owner_key)
 
-                # Decrypt name mapping
-                decrypted_mapping = brambler_service.decrypt_name_mapping(expedition_id, encrypted_mapping, owner_key)
+                if not decrypted_mappings:
+                    return jsonify({"error": "Failed to decrypt - invalid key or no encrypted data found"}), 400
 
-                if decrypted_mapping is None:
-                    return jsonify({"error": "Failed to decrypt mapping - invalid key or data"}), 400
+                # Return decrypted mappings as array for easier use
+                decrypted_list = [
+                    {
+                        "pirate_name": pirate_name,
+                        "original_name": original_name
+                    }
+                    for pirate_name, original_name in decrypted_mappings.items()
+                ]
 
-                return jsonify({"decrypted_mapping": decrypted_mapping})
+                return jsonify({
+                    "success": True,
+                    "expedition_id": expedition_id,
+                    "decrypted_count": len(decrypted_list),
+                    "mappings": decrypted_list,
+                    "mappings_dict": decrypted_mappings  # Also provide dict format
+                })
 
             except Exception as e:
-                self.logger.error(f"Brambler decrypt API error: {e}")
+                import traceback
+                self.logger.error(f"Brambler decrypt API error: {e}\n{traceback.format_exc()}")
+                return jsonify({"error": "Internal server error", "detail": str(e)}), 500
+
+        @app.route("/api/brambler/decrypt-all", methods=["POST"])
+        def api_brambler_decrypt_all():
+            """
+            API endpoint for decrypting ALL pirates and items across ALL owner's expeditions.
+            Uses the owner's master key to decrypt data from all their expeditions at once.
+            """
+            try:
+                from core.modern_service_container import get_brambler_service, get_user_service
+
+                brambler_service = get_brambler_service()
+                user_service = get_user_service(None)
+
+                # Check authentication - require owner permission
+                chat_id = request.headers.get('X-Chat-ID')
+                if not chat_id:
+                    return jsonify({"error": "Authentication required"}), 401
+
+                try:
+                    chat_id = int(chat_id)
+                    user_level = user_service.get_user_permission_level(chat_id)
+                    if not user_level or user_level.value != 'owner':
+                        return jsonify({"error": "Owner permission required"}), 403
+                except (ValueError, TypeError):
+                    return jsonify({"error": "Invalid chat ID"}), 400
+
+                # Parse request data
+                data = request.get_json()
+                if not data:
+                    return jsonify({"error": "Request body required"}), 400
+
+                owner_key = data.get('owner_key')
+                if not owner_key:
+                    return jsonify({"error": "owner_key is required"}), 400
+
+                # Decrypt ALL pirates and items for this owner
+                pirate_mappings = brambler_service.decrypt_all_owner_pirates(chat_id, owner_key)
+                item_mappings = brambler_service.decrypt_all_owner_items(chat_id, owner_key)
+
+                self.logger.info(f"Bulk decrypted {len(pirate_mappings)} pirates and {len(item_mappings)} items for owner {chat_id}")
+
+                return jsonify({
+                    "success": True,
+                    "owner_chat_id": chat_id,
+                    "pirate_mappings": pirate_mappings,
+                    "item_mappings": item_mappings,
+                    "total_pirates_decrypted": len(pirate_mappings),
+                    "total_items_decrypted": len(item_mappings)
+                })
+
+            except Exception as e:
+                import traceback
+                self.logger.error(f"Brambler decrypt-all API error: {e}\n{traceback.format_exc()}")
+                return jsonify({"error": "Internal server error", "detail": str(e)}), 500
+
+        @app.route("/api/brambler/owner-key/<int:expedition_id>", methods=["GET"])
+        def api_brambler_get_owner_key(expedition_id: int):
+            """
+            API endpoint to retrieve owner key for an expedition (owner-only access).
+            Used by webapp to decrypt pirate names.
+            """
+            try:
+                from core.modern_service_container import get_expedition_service, get_user_service
+
+                expedition_service = get_expedition_service()
+                user_service = get_user_service(None)
+
+                # Check authentication - require owner permission
+                chat_id = request.headers.get('X-Chat-ID')
+                if not chat_id:
+                    return jsonify({"error": "Authentication required"}), 401
+
+                try:
+                    chat_id = int(chat_id)
+                    user_level = user_service.get_user_permission_level(chat_id)
+                    if not user_level or user_level.value != 'owner':
+                        return jsonify({"error": "Owner permission required"}), 403
+                except (ValueError, TypeError):
+                    return jsonify({"error": "Invalid chat ID"}), 400
+
+                # Get expedition and validate ownership
+                expedition = expedition_service.get_expedition_by_id(expedition_id)
+                if not expedition:
+                    return jsonify({"error": "Expedition not found"}), 404
+
+                if expedition.owner_chat_id != chat_id:
+                    return jsonify({"error": "Only expedition owner can access the owner key"}), 403
+
+                # Get owner key
+                owner_key = expedition_service.get_expedition_owner_key(expedition_id, chat_id)
+                if not owner_key:
+                    return jsonify({"error": "Owner key not found for this expedition"}), 404
+
+                return jsonify({
+                    "success": True,
+                    "expedition_id": expedition_id,
+                    "owner_key": owner_key
+                })
+
+            except Exception as e:
+                self.logger.error(f"Get owner key API error: {e}")
                 return jsonify({"error": "Internal server error"}), 500
+
+        @app.route("/api/brambler/master-key", methods=["GET"])
+        def api_brambler_get_user_master_key():
+            """
+            API endpoint to retrieve the user's master key (owner-only access).
+            This is a SINGLE key that works for ALL expeditions owned by this user.
+            """
+            try:
+                from core.modern_service_container import get_user_service
+                from utils.encryption import get_encryption_service
+                from database import get_db_manager
+
+                user_service = get_user_service(None)
+                encryption_service = get_encryption_service()
+                db_manager = get_db_manager()
+
+                # Check authentication - require owner permission
+                chat_id = request.headers.get('X-Chat-ID')
+                if not chat_id:
+                    return jsonify({"error": "Authentication required"}), 401
+
+                try:
+                    chat_id = int(chat_id)
+                    user_level = user_service.get_user_permission_level(chat_id)
+                    if not user_level or user_level.value != 'owner':
+                        return jsonify({"error": "Owner permission required"}), 403
+                except (ValueError, TypeError):
+                    return jsonify({"error": "Invalid chat ID"}), 400
+
+                # Check if user already has a master key stored
+                with db_manager.get_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            SELECT master_key, created_at, key_version
+                            FROM user_master_keys
+                            WHERE owner_chat_id = %s
+                        """, (chat_id,))
+                        result = cur.fetchone()
+
+                        if result:
+                            # Update last_accessed timestamp
+                            cur.execute("""
+                                UPDATE user_master_keys
+                                SET last_accessed = CURRENT_TIMESTAMP
+                                WHERE owner_chat_id = %s
+                            """, (chat_id,))
+                            conn.commit()
+
+                            master_key, created_at, key_version = result
+                            return jsonify({
+                                "success": True,
+                                "master_key": master_key,
+                                "owner_chat_id": chat_id,
+                                "created_at": created_at.isoformat() if created_at else None,
+                                "key_version": key_version,
+                                "message": "This is your master key - it works for ALL your expeditions"
+                            })
+
+                        else:
+                            # Generate and store new master key
+                            master_key = encryption_service.generate_user_master_key(chat_id)
+
+                            cur.execute("""
+                                INSERT INTO user_master_keys (owner_chat_id, master_key, key_version)
+                                VALUES (%s, %s, 1)
+                                RETURNING created_at
+                            """, (chat_id, master_key))
+                            created_at = cur.fetchone()[0]
+                            conn.commit()
+
+                            self.logger.info(f"Generated and stored master key for chat_id {chat_id}")
+
+                            return jsonify({
+                                "success": True,
+                                "master_key": master_key,
+                                "owner_chat_id": chat_id,
+                                "created_at": created_at.isoformat() if created_at else None,
+                                "key_version": 1,
+                                "message": "New master key generated - save this key! It works for ALL your expeditions"
+                            })
+
+            except Exception as e:
+                import traceback
+                self.logger.error(f"Get user master key API error: {e}\n{traceback.format_exc()}")
+                return jsonify({"error": "Internal server error", "detail": str(e)}), 500
 
         @app.route("/api/brambler/names/<int:expedition_id>", methods=["GET"])
         def api_brambler_names(expedition_id: int):
@@ -1277,6 +1503,436 @@ class BotApplication:
 
             except Exception as e:
                 self.logger.error(f"Brambler names API error: {e}")
+                return jsonify({"error": "Internal server error"}), 500
+
+        @app.route("/api/brambler/all-names", methods=["GET"])
+        def api_brambler_all_names():
+            """API endpoint for getting ALL pirate names across all expeditions (maintenance).
+            OPTIMIZED: Uses caching and pagination for faster response.
+            """
+            try:
+                from core.modern_service_container import get_brambler_service, get_user_service
+                from functools import lru_cache
+                import time
+
+                start_time = time.time()
+
+                brambler_service = get_brambler_service()
+                user_service = get_user_service(None)
+
+                # Check authentication - require owner permission for global view
+                chat_id = request.headers.get('X-Chat-ID')
+                if not chat_id:
+                    return jsonify({"error": "Authentication required"}), 401
+
+                try:
+                    chat_id = int(chat_id)
+                    user_level = user_service.get_user_permission_level(chat_id)
+                    # Only system owners or admins can view all pirate names
+                    if not user_level or user_level.value not in ['owner', 'admin']:
+                        return jsonify({"error": "Owner/Admin permission required"}), 403
+                except (ValueError, TypeError):
+                    return jsonify({"error": "Invalid chat ID"}), 400
+
+                # OPTIMIZATION: Get pagination parameters (default limit 100 for fast response)
+                limit = min(int(request.args.get('limit', 100)), 1000)  # Max 1000
+                offset = int(request.args.get('offset', 0))
+
+                # Get pirate names with optimized query
+                self.logger.info(f"Fetching pirates with limit={limit}, offset={offset}")
+                all_pirates = brambler_service.get_all_expedition_pirates()
+
+                # Apply pagination in Python (already limited to 1000 in query)
+                paginated_pirates = all_pirates[offset:offset+limit]
+
+                elapsed = time.time() - start_time
+                self.logger.info(f"Brambler all-names completed in {elapsed:.3f}s")
+
+                return jsonify({
+                    "success": True,
+                    "pirates": paginated_pirates,
+                    "total_count": len(all_pirates),
+                    "returned_count": len(paginated_pirates),
+                    "limit": limit,
+                    "offset": offset,
+                    "response_time_ms": int(elapsed * 1000)
+                })
+
+            except Exception as e:
+                self.logger.error(f"Brambler all-names API error: {e}", exc_info=True)
+                return jsonify({"error": "Internal server error", "details": str(e)}), 500
+
+        @app.route("/api/brambler/update/<int:pirate_id>", methods=["PUT"])
+        def api_brambler_update_pirate(pirate_id: int):
+            """API endpoint for updating a pirate name by ID."""
+            try:
+                from core.modern_service_container import get_brambler_service, get_user_service
+
+                brambler_service = get_brambler_service()
+                user_service = get_user_service(None)
+
+                # Check authentication
+                chat_id = request.headers.get('X-Chat-ID')
+                if not chat_id:
+                    return jsonify({"error": "Authentication required"}), 401
+
+                try:
+                    chat_id = int(chat_id)
+                    user_level = user_service.get_user_permission_level(chat_id)
+                    # Only owners/admins can update pirate names
+                    if not user_level or user_level.value not in ['owner', 'admin']:
+                        return jsonify({"error": "Owner/Admin permission required"}), 403
+                except (ValueError, TypeError):
+                    return jsonify({"error": "Invalid chat ID"}), 400
+
+                # Get new pirate name from request body
+                data = request.get_json()
+                if not data or 'pirate_name' not in data:
+                    return jsonify({"error": "pirate_name is required"}), 400
+
+                new_pirate_name = data['pirate_name']
+                if not new_pirate_name or not new_pirate_name.strip():
+                    return jsonify({"error": "pirate_name cannot be empty"}), 400
+
+                # Update the pirate name
+                success = brambler_service.update_pirate_name_by_id(pirate_id, new_pirate_name)
+
+                if success:
+                    return jsonify({
+                        "success": True,
+                        "pirate_id": pirate_id,
+                        "new_pirate_name": new_pirate_name,
+                        "message": "Pirate name updated successfully"
+                    })
+                else:
+                    return jsonify({"error": "Failed to update pirate name"}), 500
+
+            except Exception as e:
+                self.logger.error(f"Brambler update API error: {e}")
+                return jsonify({"error": "Internal server error"}), 500
+
+        @app.route("/api/brambler/create", methods=["POST"])
+        def api_brambler_create_pirate():
+            """API endpoint for creating a new pirate with optional custom name."""
+            try:
+                from core.modern_service_container import get_brambler_service, get_user_service, get_expedition_service
+
+                brambler_service = get_brambler_service()
+                user_service = get_user_service(None)
+                expedition_service = get_expedition_service()
+
+                # Check authentication
+                chat_id = request.headers.get('X-Chat-ID')
+                if not chat_id:
+                    return jsonify({"error": "Authentication required"}), 401
+
+                try:
+                    chat_id = int(chat_id)
+                    user_level = user_service.get_user_permission_level(chat_id)
+                    # Only owners/admins can create pirates
+                    if not user_level or user_level.value not in ['owner', 'admin']:
+                        return jsonify({"error": "Owner/Admin permission required"}), 403
+                except (ValueError, TypeError):
+                    return jsonify({"error": "Invalid chat ID"}), 400
+
+                # Get data from request body
+                data = request.get_json()
+                if not data:
+                    return jsonify({"error": "Request body is required"}), 400
+
+                expedition_id = data.get('expedition_id')
+                original_name = data.get('original_name')
+                pirate_name = data.get('pirate_name')  # Optional - will be generated if not provided
+
+                if not expedition_id:
+                    return jsonify({"error": "expedition_id is required"}), 400
+                if not original_name or not original_name.strip():
+                    return jsonify({"error": "original_name is required"}), 400
+
+                # Verify expedition exists
+                expedition = expedition_service.get_expedition_by_id(expedition_id)
+                if not expedition:
+                    return jsonify({"error": "Expedition not found"}), 404
+
+                # Get owner key if available (for encryption)
+                owner_key = None
+                if hasattr(expedition, 'owner_key') and expedition.owner_key:
+                    owner_key = expedition.owner_key
+
+                # Create the pirate
+                result = brambler_service.create_pirate(
+                    expedition_id=expedition_id,
+                    original_name=original_name,
+                    pirate_name=pirate_name,  # None if not provided
+                    owner_key=owner_key
+                )
+
+                if result:
+                    return jsonify({
+                        "success": True,
+                        "pirate": result,
+                        "message": "Pirate created successfully"
+                    }), 201
+                else:
+                    return jsonify({"error": "Failed to create pirate (may already exist)"}), 400
+
+            except Exception as e:
+                self.logger.error(f"Brambler create API error: {e}")
+                return jsonify({"error": "Internal server error"}), 500
+
+        @app.route("/api/brambler/items/create", methods=["POST"])
+        def api_brambler_create_item():
+            """API endpoint for creating encrypted items."""
+            try:
+                from core.modern_service_container import get_brambler_service, get_user_service, get_expedition_service
+
+                brambler_service = get_brambler_service()
+                user_service = get_user_service(None)
+                expedition_service = get_expedition_service()
+
+                # Check authentication - Owner only
+                chat_id = request.headers.get('X-Chat-ID')
+                if not chat_id:
+                    return jsonify({"error": "Authentication required"}), 401
+
+                try:
+                    chat_id = int(chat_id)
+                    user_level = user_service.get_user_permission_level(chat_id)
+                    if not user_level or user_level.value != 'owner':
+                        return jsonify({"error": "Owner permission required"}), 403
+                except (ValueError, TypeError):
+                    return jsonify({"error": "Invalid chat ID"}), 400
+
+                # Get data from request body
+                data = request.get_json()
+                if not data:
+                    return jsonify({"error": "Request body is required"}), 400
+
+                expedition_id = data.get('expedition_id')
+                original_item_name = data.get('original_item_name')
+                encrypted_name = data.get('encrypted_name')  # Optional
+                owner_key = data.get('owner_key')
+                item_type = data.get('item_type', 'product')
+
+                if not expedition_id:
+                    return jsonify({"error": "expedition_id is required"}), 400
+                if not original_item_name or not original_item_name.strip():
+                    return jsonify({"error": "original_item_name is required"}), 400
+
+                # Verify expedition exists and belongs to owner
+                expedition = expedition_service.get_expedition_by_id(expedition_id)
+                if not expedition:
+                    return jsonify({"error": "Expedition not found"}), 404
+
+                if hasattr(expedition, 'owner_chat_id') and expedition.owner_chat_id != chat_id:
+                    return jsonify({"error": "You don't own this expedition"}), 403
+
+                # Create encrypted item
+                result = brambler_service.create_encrypted_item(
+                    expedition_id=expedition_id,
+                    original_item_name=original_item_name,
+                    encrypted_name=encrypted_name,
+                    owner_key=owner_key,
+                    item_type=item_type
+                )
+
+                if result:
+                    return jsonify({
+                        "success": True,
+                        "item": result,
+                        "message": f"Item '{result['encrypted_item_name']}' created successfully"
+                    }), 201
+                else:
+                    return jsonify({"error": "Failed to create encrypted item"}), 400
+
+            except Exception as e:
+                self.logger.error(f"Brambler create item API error: {e}")
+                return jsonify({"error": "Internal server error"}), 500
+
+        @app.route("/api/brambler/items/all", methods=["GET"])
+        def api_brambler_get_all_items():
+            """API endpoint to get all encrypted items across owner's expeditions.
+            OPTIMIZED: Adds pagination and performance logging.
+            """
+            try:
+                from core.modern_service_container import get_brambler_service, get_user_service
+                import time
+
+                start_time = time.time()
+
+                brambler_service = get_brambler_service()
+                user_service = get_user_service(None)
+
+                # Check authentication - Owner only
+                chat_id = request.headers.get('X-Chat-ID')
+                if not chat_id:
+                    return jsonify({"error": "Authentication required"}), 401
+
+                try:
+                    chat_id = int(chat_id)
+                    user_level = user_service.get_user_permission_level(chat_id)
+                    if not user_level or user_level.value != 'owner':
+                        return jsonify({"error": "Owner permission required"}), 403
+                except (ValueError, TypeError):
+                    return jsonify({"error": "Invalid chat ID"}), 400
+
+                # OPTIMIZATION: Get pagination parameters (default limit 100)
+                limit = min(int(request.args.get('limit', 100)), 1000)
+                offset = int(request.args.get('offset', 0))
+
+                # Get all encrypted items
+                self.logger.info(f"Fetching items for owner {chat_id} with limit={limit}, offset={offset}")
+                items = brambler_service.get_all_encrypted_items(chat_id)
+
+                # Apply pagination
+                paginated_items = items[offset:offset+limit]
+
+                elapsed = time.time() - start_time
+                self.logger.info(f"Brambler items/all completed in {elapsed:.3f}s")
+
+                return jsonify({
+                    "success": True,
+                    "items": paginated_items,
+                    "total_count": len(items),
+                    "returned_count": len(paginated_items),
+                    "limit": limit,
+                    "offset": offset,
+                    "response_time_ms": int(elapsed * 1000)
+                }), 200
+
+            except Exception as e:
+                self.logger.error(f"Brambler get all items API error: {e}", exc_info=True)
+                return jsonify({"error": "Internal server error", "details": str(e)}), 500
+
+        @app.route("/api/brambler/items/decrypt/<int:expedition_id>", methods=["POST"])
+        def api_brambler_decrypt_items(expedition_id):
+            """API endpoint to decrypt item names for a specific expedition."""
+            try:
+                from core.modern_service_container import get_brambler_service, get_user_service, get_expedition_service
+
+                brambler_service = get_brambler_service()
+                user_service = get_user_service(None)
+                expedition_service = get_expedition_service()
+
+                # Check authentication - Owner only
+                chat_id = request.headers.get('X-Chat-ID')
+                if not chat_id:
+                    return jsonify({"error": "Authentication required"}), 401
+
+                try:
+                    chat_id = int(chat_id)
+                    user_level = user_service.get_user_permission_level(chat_id)
+                    if not user_level or user_level.value != 'owner':
+                        return jsonify({"error": "Owner permission required"}), 403
+                except (ValueError, TypeError):
+                    return jsonify({"error": "Invalid chat ID"}), 400
+
+                # Verify expedition ownership
+                expedition = expedition_service.get_expedition_by_id(expedition_id)
+                if not expedition:
+                    return jsonify({"error": "Expedition not found"}), 404
+
+                if hasattr(expedition, 'owner_chat_id') and expedition.owner_chat_id != chat_id:
+                    return jsonify({"error": "You don't own this expedition"}), 403
+
+                # Get owner_key from request body
+                data = request.get_json()
+                if not data:
+                    return jsonify({"error": "Request body with owner_key is required"}), 400
+
+                owner_key = data.get('owner_key')
+                if not owner_key:
+                    return jsonify({"error": "owner_key is required"}), 400
+
+                # Decrypt item names
+                mappings = brambler_service.decrypt_item_names(expedition_id, owner_key)
+
+                return jsonify(mappings), 200
+
+            except Exception as e:
+                self.logger.error(f"Brambler decrypt items API error: {e}")
+                return jsonify({"error": "Decryption failed"}), 500
+
+        @app.route("/api/brambler/pirate/<int:pirate_id>", methods=["DELETE"])
+        def api_brambler_delete_pirate(pirate_id):
+            """API endpoint to delete a pirate."""
+            try:
+                from core.modern_service_container import get_brambler_service, get_user_service
+
+                brambler_service = get_brambler_service()
+                user_service = get_user_service(None)
+
+                # Check authentication - Owner only
+                chat_id = request.headers.get('X-Chat-ID')
+                if not chat_id:
+                    return jsonify({"error": "Authentication required"}), 401
+
+                try:
+                    chat_id = int(chat_id)
+                    user_level = user_service.get_user_permission_level(chat_id)
+                    if not user_level or user_level.value != 'owner':
+                        return jsonify({"error": "Owner permission required"}), 403
+                except (ValueError, TypeError):
+                    return jsonify({"error": "Invalid chat ID"}), 400
+
+                # Delete pirate (service validates ownership)
+                success = brambler_service.delete_pirate(
+                    expedition_id=None,
+                    pirate_id=pirate_id,
+                    owner_chat_id=chat_id
+                )
+
+                if success:
+                    return jsonify({
+                        "success": True,
+                        "message": "Pirate deleted successfully"
+                    }), 200
+                else:
+                    return jsonify({"error": "Failed to delete pirate or not found"}), 404
+
+            except Exception as e:
+                self.logger.error(f"Brambler delete pirate API error: {e}")
+                return jsonify({"error": "Internal server error"}), 500
+
+        @app.route("/api/brambler/items/<int:item_id>", methods=["DELETE"])
+        def api_brambler_delete_item(item_id):
+            """API endpoint to delete an encrypted item."""
+            try:
+                from core.modern_service_container import get_brambler_service, get_user_service
+
+                brambler_service = get_brambler_service()
+                user_service = get_user_service(None)
+
+                # Check authentication - Owner only
+                chat_id = request.headers.get('X-Chat-ID')
+                if not chat_id:
+                    return jsonify({"error": "Authentication required"}), 401
+
+                try:
+                    chat_id = int(chat_id)
+                    user_level = user_service.get_user_permission_level(chat_id)
+                    if not user_level or user_level.value != 'owner':
+                        return jsonify({"error": "Owner permission required"}), 403
+                except (ValueError, TypeError):
+                    return jsonify({"error": "Invalid chat ID"}), 400
+
+                # Delete encrypted item (service validates ownership)
+                success = brambler_service.delete_encrypted_item(
+                    expedition_id=None,
+                    item_id=item_id,
+                    owner_chat_id=chat_id
+                )
+
+                if success:
+                    return jsonify({
+                        "success": True,
+                        "message": "Encrypted item deleted successfully"
+                    }), 200
+                else:
+                    return jsonify({"error": "Failed to delete item or not found"}), 404
+
+            except Exception as e:
+                self.logger.error(f"Brambler delete item API error: {e}")
                 return jsonify({"error": "Internal server error"}), 500
 
         # ===== EXPEDITION DASHBOARD AND REPORTING ENDPOINTS =====

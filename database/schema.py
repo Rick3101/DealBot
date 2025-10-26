@@ -38,7 +38,7 @@ def initialize_schema():
         id SERIAL PRIMARY KEY,
         name VARCHAR(200) NOT NULL,
         owner_chat_id BIGINT NOT NULL,
-        owner_user_id INTEGER,
+        owner_user_id BIGINT,
         owner_key TEXT,
         admin_key TEXT,
         encryption_version INTEGER DEFAULT 1,
@@ -117,6 +117,16 @@ def initialize_schema():
         data_atualizacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- Create user_master_keys table (for consistent user encryption keys)
+    CREATE TABLE IF NOT EXISTS user_master_keys (
+        id SERIAL PRIMARY KEY,
+        owner_chat_id BIGINT UNIQUE NOT NULL,
+        master_key TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_accessed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        key_version INTEGER DEFAULT 1
+    );
+
     -- Create BroadcastMessages table (for broadcast messaging system)
     CREATE TABLE IF NOT EXISTS BroadcastMessages (
         id SERIAL PRIMARY KEY,
@@ -171,12 +181,16 @@ def initialize_schema():
 
 
     -- Create expedition_items table (for expedition inventory requirements)
+    -- SECURITY: Supports full encryption mode for item anonymization
     CREATE TABLE IF NOT EXISTS expedition_items (
         id SERIAL PRIMARY KEY,
         expedition_id INTEGER REFERENCES Expeditions(id) ON DELETE CASCADE,
         produto_id INTEGER REFERENCES Produtos(id),
+        original_product_name VARCHAR(200),  -- NULLABLE: NULL when using full encryption
         encrypted_product_name TEXT,
+        encrypted_mapping TEXT,  -- AES-256-GCM encrypted original name
         anonymized_item_code VARCHAR(50),
+        item_type VARCHAR(50) DEFAULT 'product',  -- product, custom, resource
         quantity_required INTEGER NOT NULL,
         quantity_consumed INTEGER DEFAULT 0,
         target_unit_price DECIMAL(10,2),
@@ -185,11 +199,16 @@ def initialize_schema():
         priority_level INTEGER DEFAULT 1 CHECK (priority_level BETWEEN 1 AND 5),
         notes TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_by_chat_id BIGINT,
+        UNIQUE(expedition_id, encrypted_product_name),
+        CONSTRAINT unique_original_product_when_not_null UNIQUE NULLS NOT DISTINCT (expedition_id, original_product_name)
     );
 
-    -- Create pirate_names table (for anonymization system)
-    -- expedition_id can be NULL for global pirate mappings
+    -- DEPRECATED: Create pirate_names table (for anonymization system)
+    -- This table is deprecated and replaced by expedition_pirates for expedition-specific names
+    -- Only used for global pirate mappings (expedition_id IS NULL) - consider using item_mappings instead
+    -- Will be removed in a future version after full migration
     CREATE TABLE IF NOT EXISTS pirate_names (
         id SERIAL PRIMARY KEY,
         expedition_id INTEGER REFERENCES Expeditions(id) ON DELETE CASCADE,
@@ -229,19 +248,22 @@ def initialize_schema():
     );
 
     -- Create expedition_pirates table (for managing expedition participants)
+    -- SECURITY: original_name is NULLABLE to support full encryption mode
+    -- When encrypted_identity is used, original_name MUST be NULL for true anonymization
     CREATE TABLE IF NOT EXISTS expedition_pirates (
         id SERIAL PRIMARY KEY,
         expedition_id INTEGER REFERENCES Expeditions(id) ON DELETE CASCADE,
         pirate_name VARCHAR(100) NOT NULL,
-        original_name VARCHAR(100) NOT NULL,
+        original_name VARCHAR(100),  -- NULLABLE: NULL when using full encryption
         chat_id BIGINT,
         user_id INTEGER REFERENCES Usuarios(id),
-        encrypted_identity TEXT,
+        encrypted_identity TEXT,  -- REQUIRED for full encryption mode
         role VARCHAR(20) DEFAULT 'participant' CHECK (role IN ('participant', 'officer', 'captain')),
         joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'banned')),
         UNIQUE(expedition_id, pirate_name),
-        UNIQUE(expedition_id, original_name)
+        -- Note: original_name uniqueness only enforced when not NULL
+        CONSTRAINT unique_original_name_when_not_null UNIQUE NULLS NOT DISTINCT (expedition_id, original_name)
     );
 
     -- Create expedition_assignments table (for consumption tracking and debt management)
@@ -305,6 +327,8 @@ def initialize_schema():
     CREATE INDEX IF NOT EXISTS idx_pollanswers_broadcast_id ON PollAnswers(broadcast_id);
     CREATE INDEX IF NOT EXISTS idx_pollanswers_poll_id ON PollAnswers(poll_id);
     CREATE INDEX IF NOT EXISTS idx_pollanswers_user_id ON PollAnswers(user_id);
+    CREATE INDEX IF NOT EXISTS idx_usermasterkeys_owner_chat_id ON user_master_keys(owner_chat_id);
+    CREATE INDEX IF NOT EXISTS idx_usermasterkeys_last_accessed ON user_master_keys(last_accessed);
     CREATE INDEX IF NOT EXISTS idx_cashtransactions_tipo ON CashTransactions(tipo);
     CREATE INDEX IF NOT EXISTS idx_cashtransactions_data ON CashTransactions(data_transacao);
     CREATE INDEX IF NOT EXISTS idx_cashtransactions_venda ON CashTransactions(venda_id);
@@ -315,6 +339,7 @@ def initialize_schema():
     CREATE INDEX IF NOT EXISTS idx_expeditions_created ON Expeditions(created_at);
     CREATE INDEX IF NOT EXISTS idx_expeditionitems_expedition ON expedition_items(expedition_id);
     CREATE INDEX IF NOT EXISTS idx_expeditionitems_produto ON expedition_items(produto_id);
+    -- DEPRECATED: Legacy pirate_names indexes (table is deprecated, use expedition_pirates)
     CREATE INDEX IF NOT EXISTS idx_piratenames_expedition ON pirate_names(expedition_id);
     CREATE INDEX IF NOT EXISTS idx_piratenames_original ON pirate_names(original_name);
     CREATE INDEX IF NOT EXISTS idx_itemconsumptions_expedition ON item_consumptions(expedition_id);
@@ -344,7 +369,7 @@ def initialize_schema():
     CREATE INDEX IF NOT EXISTS idx_itemconsumptions_exp_payment_cost ON item_consumptions(expedition_id, payment_status, total_cost);
     -- For search functionality - name pattern search
     CREATE INDEX IF NOT EXISTS idx_expeditions_name_lower ON Expeditions(LOWER(name));
-    -- For pirate name lookups - expedition + original name
+    -- DEPRECATED: Legacy pirate name lookups (use expedition_pirates)
     CREATE INDEX IF NOT EXISTS idx_piratenames_exp_original ON pirate_names(expedition_id, original_name);
     -- For analytics queries - expedition items with products
     CREATE INDEX IF NOT EXISTS idx_expeditionitems_produto_expedition ON expedition_items(produto_id, expedition_id);
@@ -418,6 +443,39 @@ def initialize_schema():
     CREATE INDEX IF NOT EXISTS idx_vendas_expedition_buyer ON Vendas(expedition_id, comprador) WHERE expedition_id IS NOT NULL;
     -- For unpaid sales lookup optimization
     CREATE INDEX IF NOT EXISTS idx_vendas_buyer_date ON Vendas(comprador, data_venda DESC);
+
+    -- ===========================================================================
+    -- BRAMBLER MANAGEMENT CONSOLE PERFORMANCE OPTIMIZATION INDEXES
+    -- Added: 2025-10-25 to fix 10s timeout issues on /api/brambler endpoints
+    -- ===========================================================================
+
+    -- Critical: Optimize get_all_expedition_pirates JOIN query
+    -- This index eliminates full table scans on expedition_pirates LEFT JOIN expeditions
+    CREATE INDEX IF NOT EXISTS idx_brambler_pirates_with_expedition
+        ON expedition_pirates(expedition_id, id, pirate_name, original_name)
+        INCLUDE (encrypted_identity, joined_at)
+        WHERE encrypted_identity IS NOT NULL OR original_name IS NOT NULL;
+
+    -- Critical: Optimize get_all_encrypted_items JOIN query
+    -- Covers the expedition_items LEFT JOIN expeditions query pattern
+    CREATE INDEX IF NOT EXISTS idx_brambler_items_with_expedition
+        ON expedition_items(expedition_id, id, encrypted_product_name)
+        INCLUDE (encrypted_mapping, anonymized_item_code, item_type, quantity_required, quantity_consumed, item_status, created_at)
+        WHERE encrypted_mapping IS NOT NULL AND encrypted_mapping != '';
+
+    -- Optimize expeditions lookup by owner_chat_id (used in brambler filtering)
+    CREATE INDEX IF NOT EXISTS idx_expeditions_owner_brambler
+        ON expeditions(owner_chat_id, id, name, status);
+
+    -- Optimize pirate queries with encryption status
+    CREATE INDEX IF NOT EXISTS idx_pirates_encrypted_status
+        ON expedition_pirates(expedition_id, encrypted_identity)
+        WHERE encrypted_identity IS NOT NULL AND encrypted_identity != '';
+
+    -- Optimize item queries with encryption status
+    CREATE INDEX IF NOT EXISTS idx_items_encrypted_status
+        ON expedition_items(expedition_id, encrypted_mapping)
+        WHERE encrypted_mapping IS NOT NULL AND encrypted_mapping != '';
     """
     
     try:
@@ -440,7 +498,7 @@ def initialize_schema():
                 cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expeditions' AND column_name = 'owner_user_id'")
                 if not cursor.fetchone():
                     logger.info("Adding owner_user_id column to existing expeditions table")
-                    cursor.execute("ALTER TABLE expeditions ADD COLUMN owner_user_id INTEGER")
+                    cursor.execute("ALTER TABLE expeditions ADD COLUMN owner_user_id BIGINT")
                     logger.info("Added owner_user_id column successfully")
 
                 # Handle migration for new dual encryption fields
@@ -529,6 +587,31 @@ def initialize_schema():
                     cursor.execute("ALTER TABLE expedition_items ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
                     logger.info("Added updated_at column successfully")
 
+                # Add new columns for full item encryption support (Brambler Management Console)
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expedition_items' AND column_name = 'original_product_name'")
+                if not cursor.fetchone():
+                    logger.info("Adding original_product_name column to existing expedition_items table")
+                    cursor.execute("ALTER TABLE expedition_items ADD COLUMN original_product_name VARCHAR(200)")
+                    logger.info("Added original_product_name column successfully")
+
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expedition_items' AND column_name = 'encrypted_mapping'")
+                if not cursor.fetchone():
+                    logger.info("Adding encrypted_mapping column to existing expedition_items table")
+                    cursor.execute("ALTER TABLE expedition_items ADD COLUMN encrypted_mapping TEXT")
+                    logger.info("Added encrypted_mapping column successfully")
+
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expedition_items' AND column_name = 'item_type'")
+                if not cursor.fetchone():
+                    logger.info("Adding item_type column to existing expedition_items table")
+                    cursor.execute("ALTER TABLE expedition_items ADD COLUMN item_type VARCHAR(50) DEFAULT 'product'")
+                    logger.info("Added item_type column successfully")
+
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'expedition_items' AND column_name = 'created_by_chat_id'")
+                if not cursor.fetchone():
+                    logger.info("Adding created_by_chat_id column to existing expedition_items table")
+                    cursor.execute("ALTER TABLE expedition_items ADD COLUMN created_by_chat_id BIGINT")
+                    logger.info("Added created_by_chat_id column successfully")
+
                 # Handle migration for item_consumptions table payment tracking
                 # First check if the table exists
                 cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_name = 'item_consumptions'")
@@ -538,6 +621,34 @@ def initialize_schema():
                         logger.info("Adding amount_paid column to existing item_consumptions table")
                         cursor.execute("ALTER TABLE item_consumptions ADD COLUMN amount_paid DECIMAL(10,2) DEFAULT 0.00 NOT NULL")
                         logger.info("Added amount_paid column successfully")
+
+                # SECURITY MIGRATION: Make original_name nullable in expedition_pirates for encryption support
+                cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_name = 'expedition_pirates'")
+                if cursor.fetchone():
+                    cursor.execute("""
+                        SELECT is_nullable FROM information_schema.columns
+                        WHERE table_name = 'expedition_pirates' AND column_name = 'original_name'
+                    """)
+                    result = cursor.fetchone()
+                    if result and result[0] == 'NO':
+                        logger.info("SECURITY: Making original_name nullable in expedition_pirates for encryption support")
+                        # Drop the unique constraint first
+                        cursor.execute("""
+                            ALTER TABLE expedition_pirates
+                            DROP CONSTRAINT IF EXISTS expedition_pirates_expedition_id_original_name_key
+                        """)
+                        # Make column nullable
+                        cursor.execute("""
+                            ALTER TABLE expedition_pirates
+                            ALTER COLUMN original_name DROP NOT NULL
+                        """)
+                        # Add new unique constraint that allows NULLs
+                        cursor.execute("""
+                            ALTER TABLE expedition_pirates
+                            ADD CONSTRAINT unique_original_name_when_not_null
+                            UNIQUE NULLS NOT DISTINCT (expedition_id, original_name)
+                        """)
+                        logger.info("Successfully updated original_name column to support encryption")
 
                 # Check if pirate_names table exists and needs migration for global mappings
                 cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_name = 'pirate_names'")
@@ -614,7 +725,7 @@ def initialize_schema():
 def health_check_schema() -> dict:
     """
     Check if all required tables exist.
-    
+
     Returns:
         Dictionary with schema health status
     """
@@ -623,10 +734,13 @@ def health_check_schema() -> dict:
         'estoque', 'pagamentos', 'smartcontracts',
         'transacoes', 'configuracoes', 'broadcastmessages',
         'pollanswers', 'cashbalance', 'cashtransactions',
-        'expeditions', 'expedition_items', 'pirate_names', 'item_consumptions',
+        'expeditions', 'expedition_items', 'item_consumptions',
         'expedition_pirates', 'expedition_assignments', 'expedition_payments',
         'item_mappings'
     ]
+
+    # Legacy table - kept for backward compatibility but not required
+    legacy_tables = ['pirate_names']
     
     db_manager = get_db_manager()
     missing_tables = []

@@ -19,12 +19,12 @@ import logging
 
 
 # States
-(EXPEDITION_MENU, EXPEDITION_CREATE_NAME, EXPEDITION_CREATE_DESCRIPTION, EXPEDITION_CREATE_DEADLINE,
+(EXPEDITION_MENU, EXPEDITION_CREATE_NAME,
  EXPEDITION_ADD_ITEMS, EXPEDITION_ADD_ITEM_PRODUCT, EXPEDITION_ADD_ITEM_QUANTITY, EXPEDITION_ADD_ITEM_PRICE, EXPEDITION_ADD_ITEM_COST,
  EXPEDITION_MANAGE_PIRATES, EXPEDITION_ADD_PIRATE, EXPEDITION_REMOVE_PIRATE, EXPEDITION_LIST_MENU,
  EXPEDITION_STATUS_MENU, EXPEDITION_ITEM_MENU, EXPEDITION_CUSTOM_ASSIGNMENT, EXPEDITION_CUSTOM_NAME_INPUT,
  EXPEDITION_CONSUME_MENU, EXPEDITION_CONSUME_SELECT_PIRATE, EXPEDITION_CONSUME_SELECT_ITEM,
- EXPEDITION_CONSUME_QUANTITY, EXPEDITION_CONSUME_PRICE) = range(22)
+ EXPEDITION_CONSUME_QUANTITY, EXPEDITION_CONSUME_PRICE) = range(20)
 
 
 class ExpeditionHandler(MenuHandlerBase):
@@ -114,76 +114,12 @@ class ExpeditionHandler(MenuHandlerBase):
             )
 
     async def create_expedition_command(self, request: HandlerRequest) -> HandlerResponse:
-        """Handle expedition name input."""
+        """Handle expedition name input and create expedition immediately."""
         try:
             # Delete user input message immediately for privacy
             await self.batch_cleanup_messages([request.update.message], strategy="instant")
 
             expedition_name = InputSanitizer.sanitize_text(request.update.message.text, max_length=100)
-            request.user_data["expedition_name"] = expedition_name
-
-            return self.create_smart_response(
-                message=f"🏴‍☠️ **Expedição: {expedition_name}**\n\nDigite uma descrição para a expedição:",
-                keyboard=None,
-                interaction_type=InteractionType.FORM_INPUT,
-                content_type=ContentType.INFO,
-                next_state=EXPEDITION_CREATE_DESCRIPTION
-            )
-
-        except ValueError as e:
-            return self.create_smart_response(
-                message=f"❌ {str(e)}\n\nDigite um nome válido para a expedição:",
-                keyboard=None,
-                interaction_type=InteractionType.ERROR_DISPLAY,
-                content_type=ContentType.VALIDATION_ERROR,
-                next_state=EXPEDITION_CREATE_NAME
-            )
-
-    async def handle_description_input(self, request: HandlerRequest) -> HandlerResponse:
-        """Handle expedition description input."""
-        try:
-            # Delete user input message immediately for privacy
-            await self.batch_cleanup_messages([request.update.message], strategy="instant")
-
-            description = InputSanitizer.sanitize_text(request.update.message.text, max_length=500)
-            request.user_data["expedition_description"] = description
-
-            return self.create_smart_response(
-                message=f"📝 **Descrição registrada!**\n\n{description}\n\nQual será o prazo em dias? (1-30)",
-                keyboard=None,
-                interaction_type=InteractionType.FORM_INPUT,
-                content_type=ContentType.INFO,
-                next_state=EXPEDITION_CREATE_DEADLINE
-            )
-
-        except ValueError as e:
-            return self.create_smart_response(
-                message=f"❌ {str(e)}\n\nDigite uma descrição válida para a expedição:",
-                keyboard=None,
-                interaction_type=InteractionType.ERROR_DISPLAY,
-                content_type=ContentType.VALIDATION_ERROR,
-                next_state=EXPEDITION_CREATE_DESCRIPTION
-            )
-
-    async def handle_deadline_input(self, request: HandlerRequest) -> HandlerResponse:
-        """Handle deadline input for expedition creation."""
-        try:
-            # Delete user input message immediately
-            await self.batch_cleanup_messages([request.update.message], strategy="instant")
-
-            days_text = request.update.message.text.strip()
-
-            # Validate numeric input
-            try:
-                days = int(days_text)
-                if days < 1 or days > 30:
-                    raise ValueError("Prazo deve ser entre 1 e 30 dias")
-            except ValueError:
-                raise ValueError("Digite um número válido de dias (1-30)")
-
-            # Calculate deadline
-            deadline = datetime.now() + timedelta(days=days)
-            request.user_data["expedition_deadline"] = deadline
 
             # Create expedition using service
             expedition_service = get_expedition_service(request.context)
@@ -191,9 +127,9 @@ class ExpeditionHandler(MenuHandlerBase):
             # Create proper request object
             from models.expedition import ExpeditionCreateRequest
             expedition_request = ExpeditionCreateRequest(
-                name=request.user_data["expedition_name"],
+                name=expedition_name,
                 owner_chat_id=request.chat_id,
-                deadline=deadline
+                deadline=None  # Deadline can be set later from details page
             )
 
             expedition = expedition_service.create_expedition(expedition_request)
@@ -213,9 +149,9 @@ class ExpeditionHandler(MenuHandlerBase):
             success_message = (
                 f"✅ **Expedição Criada!**\n\n"
                 f"🏴‍☠️ Nome: {expedition.name}\n"
-                f"⏰ Prazo: {deadline.strftime('%d/%m/%Y')}\n"
                 f"🦜 Seu nome pirata: **{pirate_name}**\n\n"
-                f"*ID: {expedition.id}*"
+                f"*ID: {expedition.id}*\n\n"
+                f"Use o menu de detalhes para adicionar itens, piratas e definir prazo."
             )
 
             return HandlerResponse(
@@ -227,10 +163,12 @@ class ExpeditionHandler(MenuHandlerBase):
             )
 
         except ValueError as e:
-            return HandlerResponse(
-                message=f"❌ {str(e)}\n\nDigite o prazo em dias (1-30):",
-                next_state=EXPEDITION_CREATE_DEADLINE,
-                edit_message=True
+            return self.create_smart_response(
+                message=f"❌ {str(e)}\n\nDigite um nome válido para a expedição:",
+                keyboard=None,
+                interaction_type=InteractionType.ERROR_DISPLAY,
+                content_type=ContentType.VALIDATION_ERROR,
+                next_state=EXPEDITION_CREATE_NAME
             )
         except ServiceError as e:
             self.logger.error(f"Error creating expedition: {e}")
@@ -247,6 +185,7 @@ class ExpeditionHandler(MenuHandlerBase):
                 next_state=EXPEDITION_MENU
                 # No edit_message - using delete-and-replace pattern
             )
+
 
     async def show_pirate_management_menu(self, request: HandlerRequest) -> HandlerResponse:
         """Show pirate management options."""
@@ -1453,17 +1392,6 @@ class ExpeditionHandler(MenuHandlerBase):
         response = await self.create_expedition_command(request)
         return await self.send_response(response, request)
 
-    @with_error_boundary("expedition_create_description")
-    async def expedition_create_description_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        request = self.create_request(update, context)
-        response = await self.handle_description_input(request)
-        return await self.send_response(response, request)
-
-    @with_error_boundary("expedition_create_deadline")
-    async def expedition_create_deadline_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        request = self.create_request(update, context)
-        response = await self.handle_deadline_input(request)
-        return await self.send_response(response, request)
 
     @with_error_boundary("expedition_pirate")
     async def expedition_pirate_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2308,12 +2236,6 @@ class ExpeditionHandler(MenuHandlerBase):
                 ],
                 EXPEDITION_CREATE_NAME: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.expedition_create_name_handler)
-                ],
-                EXPEDITION_CREATE_DESCRIPTION: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.expedition_create_description_handler)
-                ],
-                EXPEDITION_CREATE_DEADLINE: [
-                    MessageHandler(filters.Regex(r"^\d+$"), self.expedition_create_deadline_handler)
                 ],
                 EXPEDITION_MANAGE_PIRATES: [
                     CallbackQueryHandler(self.expedition_pirate_handler, pattern="^exp_(pirates|add_pirate|remove_pirate|manage_pirates|back|generate_random|assign_custom)"),

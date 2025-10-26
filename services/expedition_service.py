@@ -95,7 +95,7 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
     def get_expedition_by_id(self, expedition_id: int) -> Optional[Expedition]:
         """Get expedition by ID."""
         query = """
-            SELECT id, name, owner_chat_id, status, deadline, created_at, completed_at
+            SELECT id, name, owner_chat_id, status, deadline, created_at, completed_at, owner_key
             FROM expeditions
             WHERE id = %s
         """
@@ -374,32 +374,40 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
         now = datetime.now()
 
         # Step 1: Get or create expedition_pirate record
+        # SECURITY: Query by pirate_name since original_name is now NULL (encrypted)
         pirate_query = """
             SELECT id FROM expedition_pirates
-            WHERE expedition_id = %s AND original_name = %s
+            WHERE expedition_id = %s AND pirate_name = %s
         """
-        pirate_result = self._execute_query(pirate_query, (expedition_id, request.consumer_name.strip()), fetch_one=True)
+        pirate_result = self._execute_query(pirate_query, (expedition_id, request.pirate_name.strip()), fetch_one=True)
 
         if pirate_result:
             pirate_id = pirate_result[0]
         else:
-            # Create new pirate record
-            create_pirate_query = """
-                INSERT INTO expedition_pirates
-                (expedition_id, pirate_name, original_name, role, status, joined_at)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                RETURNING id
+            # SECURITY: Use brambler_service to create encrypted pirate
+            from core.modern_service_container import get_brambler_service
+            brambler_service = get_brambler_service()
+
+            # Get expedition to retrieve owner_key
+            expedition_query = """
+                SELECT owner_key FROM expeditions WHERE id = %s
             """
-            pirate_result = self._execute_query(
-                create_pirate_query,
-                (expedition_id, request.pirate_name.strip(), request.consumer_name.strip(),
-                 'participant', 'active', now),
-                fetch_one=True
+            expedition_result = self._execute_query(expedition_query, (expedition_id,), fetch_one=True)
+            owner_key = expedition_result[0] if expedition_result and expedition_result[0] else None
+
+            # Create pirate with encryption
+            pirate_data = brambler_service.create_pirate(
+                expedition_id=expedition_id,
+                original_name=request.consumer_name.strip(),
+                pirate_name=request.pirate_name.strip(),
+                owner_key=owner_key
             )
-            if not pirate_result:
-                raise ServiceError("Failed to create pirate record")
-            pirate_id = pirate_result[0]
-            self.logger.info(f"Created new pirate record {pirate_id} for {request.consumer_name}")
+
+            if not pirate_data:
+                raise ServiceError("Failed to create encrypted pirate record")
+
+            pirate_id = pirate_data['id']
+            self.logger.info(f"Created encrypted pirate record {pirate_id} for pirate {request.pirate_name}")
 
         # Step 2: Create assignment and update item in transaction
         operations = [
@@ -601,6 +609,10 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
         if not success:
             raise ServiceError("Failed to process payment")
 
+        # CRITICAL: Invalidate cache BEFORE fetching updated data
+        # This ensures the next query doesn't use stale cached data
+        self._invalidate_expedition_cache(expedition_id)
+
         # Get updated assignment
         updated_result = self._execute_query(query, (assignment_id,), fetch_one=True)
         if not updated_result:
@@ -613,13 +625,22 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
                           status=new_status,
                           pirate=original_name)
 
-        # Invalidate expedition cache after payment
-        self._invalidate_expedition_cache(expedition_id)
-
         return Assignment.from_db_row(updated_result)
 
     def get_user_consumptions(self, consumer_name: str) -> List[Assignment]:
-        """Get all assignments (consumptions) for a specific user."""
+        """
+        Get all assignments (consumptions) for a specific user.
+
+        SECURITY WARNING: This method is DEPRECATED in its current form.
+        Since original_name is now NULL (encrypted), querying by original_name will return no results.
+
+        TODO: This method needs to be updated to either:
+        1. Accept owner_key parameter and decrypt pirate identities before querying
+        2. Change to query by pirate_name instead of original name
+        3. Return empty list and require owners to use decryption endpoints
+
+        For now, this will return EMPTY results since WHERE original_name = %s will never match NULL.
+        """
         query = """
             SELECT ea.id, ea.expedition_id, ea.pirate_id, ea.expedition_item_id,
                    ea.assigned_quantity, ea.consumed_quantity, ea.unit_price, ea.total_cost,
@@ -627,7 +648,7 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
                    ep.original_name, ep.pirate_name
             FROM expedition_assignments ea
             JOIN expedition_pirates ep ON ea.pirate_id = ep.id
-            WHERE ep.original_name = %s
+            WHERE ep.original_name = %s  -- SECURITY: This will always return empty since original_name is NOW NULL
             ORDER BY ea.assigned_at DESC
         """
 
@@ -670,6 +691,7 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
                 p.emoji as product_emoji,
                 ei.quantity_required as quantity_needed,
                 COALESCE(
+                    ei.target_unit_price,
                     (SELECT AVG(e2.preco) FROM Estoque e2
                      WHERE e2.produto_id = ei.produto_id AND e2.quantidade_restante > 0),
                     0
@@ -684,7 +706,9 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
         consumptions_data AS (
             SELECT
                 ea.id,
-                ep.original_name as consumer_name,
+                -- SECURITY: original_name is now NULL (encrypted), use pirate_name
+                COALESCE(ep.pirate_name, 'Unknown Pirate') as consumer_name,
+                COALESCE(ep.pirate_name, 'Unknown Pirate') as pirate_name,
                 p.nome as product_name,
                 ea.consumed_quantity as quantity,
                 ea.unit_price,
@@ -697,7 +721,7 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
                 ea.payment_status,
                 ea.assigned_at as consumed_at
             FROM expedition_assignments ea
-            JOIN expedition_pirates ep ON ea.pirate_id = ep.id
+            LEFT JOIN expedition_pirates ep ON ea.pirate_id = ep.id
             JOIN expedition_items ei ON ea.expedition_item_id = ei.id
             JOIN produtos p ON ei.produto_id = p.id
             WHERE ea.expedition_id = %s
@@ -806,6 +830,7 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
                     ItemConsumptionWithProduct(
                         id=consumption.id,
                         consumer_name=consumption.consumer_name,
+                        pirate_name=consumption.pirate_name,
                         product_name=product_name,
                         quantity=consumption.quantity_consumed,
                         unit_price=consumption.unit_price,
@@ -850,6 +875,7 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
             consumptions.append(ItemConsumptionWithProduct(
                 id=consumption_data['id'],
                 consumer_name=consumption_data['consumer_name'],
+                pirate_name=consumption_data['pirate_name'],
                 product_name=consumption_data['product_name'],
                 quantity=consumption_data['quantity'],
                 unit_price=Decimal(str(consumption_data['unit_price'])),
@@ -888,8 +914,8 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
                 COUNT(DISTINCT ei.id) as total_items,
                 COALESCE(SUM(ei.quantity_required), 0) as total_quantity_needed,
                 COALESCE(SUM(ei.quantity_consumed), 0) as total_quantity_consumed,
-                COALESCE(SUM(ei.quantity_required * COALESCE(pap.avg_price, 0)), 0) as total_value,
-                COALESCE(SUM(ei.quantity_consumed * COALESCE(pap.avg_price, 0)), 0) as consumed_value
+                COALESCE(SUM(ei.quantity_required * COALESCE(ei.target_unit_price, pap.avg_price, 0)), 0) as total_value,
+                COALESCE(SUM(ei.quantity_consumed * COALESCE(ei.target_unit_price, pap.avg_price, 0)), 0) as consumed_value
             FROM expeditions e
             LEFT JOIN expedition_items ei ON e.id = ei.expedition_id
             LEFT JOIN product_avg_prices pap ON ei.produto_id = pap.produto_id

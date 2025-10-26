@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test Page</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 3px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .success { background: #d4edda; }
+        .error { background: #f8d7da; }
+        .info { background: #d1ecf1; }
+    </style>
+</head>
+<body>
+    <h1>API Diagnostics</h1>
+
+    <div class="test-section">
+        <h2>1. Check Chat ID</h2>
+        <button onclick="checkChatId()">Check Chat ID</button>
+        <div id="chatIdResult" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. Test Expedition 21</h2>
+        <button onclick="testExpedition()">Test GET /api/expeditions/21</button>
+        <div id="expeditionResult" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>3. Test Brambler Names</h2>
+        <button onclick="testBramblerNames()">Test GET /api/brambler/names/21</button>
+        <div id="bramblerResult" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>4. Test Dashboard</h2>
+        <button onclick="testDashboardTimeline()">Test Timeline</button>
+        <button onclick="testDashboardAnalytics()">Test Analytics</button>
+        <div id="dashboardResult" class="result"></div>
+    </div>
+
+    <script>
+        const CHAT_ID = '5094426438'; // Morty (owner)
+
+        function showResult(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.className = `result ${type}`;
+        }
+
+        function checkChatId() {
+            const info = `
+Chat ID being used: ${CHAT_ID}
+Current URL: ${window.location.href}
+User Agent: ${navigator.userAgent}
+            `;
+            showResult('chatIdResult', info, 'info');
+        }
+
+        async function testExpedition() {
+            const start = Date.now();
+            showResult('expeditionResult', 'Loading...', 'info');
+
+            try {
+                const response = await fetch('/api/expeditions/21', {
+                    method: 'GET',
+                    headers: {
+                        'X-Chat-ID': CHAT_ID,
+                        'Content-Type': 'application/json'
+                    },
+                    signal: AbortSignal.timeout(15000)
+                });
+
+                const elapsed = Date.now() - start;
+                const data = await response.json();
+
+                if (response.ok) {
+                    const result = `
+SUCCESS (${elapsed}ms)
+Status: ${response.status}
+Expedition: ${data.name}
+Items: ${data.items?.length || 0}
+Consumptions: ${data.consumptions?.length || 0}
+
+Full response:
+${JSON.stringify(data, null, 2)}
+                    `;
+                    showResult('expeditionResult', result, 'success');
+                } else {
+                    showResult('expeditionResult', `ERROR (${elapsed}ms)\n${JSON.stringify(data, null, 2)}`, 'error');
+                }
+            } catch (err) {
+                const elapsed = Date.now() - start;
+                showResult('expeditionResult', `TIMEOUT/ERROR (${elapsed}ms)\n${err.message}\n${err.stack}`, 'error');
+            }
+        }
+
+        async function testBramblerNames() {
+            const start = Date.now();
+            showResult('bramblerResult', 'Loading...', 'info');
+
+            try {
+                const response = await fetch('/api/brambler/names/21', {
+                    method: 'GET',
+                    headers: {
+                        'X-Chat-ID': CHAT_ID,
+                        'Content-Type': 'application/json'
+                    },
+                    signal: AbortSignal.timeout(15000)
+                });
+
+                const elapsed = Date.now() - start;
+                const data = await response.json();
+
+                if (response.ok) {
+                    const result = `
+SUCCESS (${elapsed}ms)
+Status: ${response.status}
+Pirate Names: ${data.pirate_names?.length || 0}
+
+Full response:
+${JSON.stringify(data, null, 2)}
+                    `;
+                    showResult('bramblerResult', result, 'success');
+                } else {
+                    showResult('bramblerResult', `ERROR (${elapsed}ms)\n${JSON.stringify(data, null, 2)}`, 'error');
+                }
+            } catch (err) {
+                const elapsed = Date.now() - start;
+                showResult('bramblerResult', `TIMEOUT/ERROR (${elapsed}ms)\n${err.message}`, 'error');
+            }
+        }
+
+        async function testDashboardTimeline() {
+            const start = Date.now();
+            showResult('dashboardResult', 'Loading timeline...', 'info');
+
+            try {
+                const response = await fetch('/api/dashboard/timeline', {
+                    method: 'GET',
+                    headers: {
+                        'X-Chat-ID': CHAT_ID,
+                        'Content-Type': 'application/json'
+                    },
+                    signal: AbortSignal.timeout(15000)
+                });
+
+                const elapsed = Date.now() - start;
+                const data = await response.json();
+
+                if (response.ok) {
+                    showResult('dashboardResult', `SUCCESS (${elapsed}ms)\n${JSON.stringify(data, null, 2)}`, 'success');
+                } else {
+                    showResult('dashboardResult', `ERROR (${elapsed}ms)\n${JSON.stringify(data, null, 2)}`, 'error');
+                }
+            } catch (err) {
+                const elapsed = Date.now() - start;
+                showResult('dashboardResult', `TIMEOUT/ERROR (${elapsed}ms)\n${err.message}`, 'error');
+            }
+        }
+
+        async function testDashboardAnalytics() {
+            const start = Date.now();
+            showResult('dashboardResult', 'Loading analytics...', 'info');
+
+            try {
+                const response = await fetch('/api/dashboard/analytics', {
+                    method: 'GET',
+                    headers: {
+                        'X-Chat-ID': CHAT_ID,
+                        'Content-Type': 'application/json'
+                    },
+                    signal: AbortSignal.timeout(15000)
+                });
+
+                const elapsed = Date.now() - start;
+                const data = await response.json();
+
+                if (response.ok) {
+                    showResult('dashboardResult', `SUCCESS (${elapsed}ms)\n${JSON.stringify(data, null, 2)}`, 'success');
+                } else {
+                    showResult('dashboardResult', `ERROR (${elapsed}ms)\n${JSON.stringify(data, null, 2)}`, 'error');
+                }
+            } catch (err) {
+                const elapsed = Date.now() - start;
+                showResult('dashboardResult', `TIMEOUT/ERROR (${elapsed}ms)\n${err.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

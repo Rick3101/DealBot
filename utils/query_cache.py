@@ -101,6 +101,7 @@ class QueryCache:
 
             self._cache[cache_key] = {
                 'data': data,
+                'query': query,  # Store query for pattern matching
                 'expires_at': expires_at,
                 'created_at': current_time
             }
@@ -127,7 +128,7 @@ class QueryCache:
         Invalidate cache entries.
 
         Args:
-            pattern: If provided, only invalidate keys containing this pattern
+            pattern: If provided, only invalidate keys containing this pattern in the query string
 
         Returns:
             Number of entries invalidated
@@ -141,12 +142,14 @@ class QueryCache:
                 self.logger.info(f"Cleared entire cache: {count} entries")
                 return count
 
-            # Pattern-based invalidation
+            # Pattern-based invalidation - match against query string, not data
             keys_to_remove = []
-            for cache_key in self._cache.keys():
-                cache_entry = self._cache[cache_key]
-                if pattern.lower() in str(cache_entry.get('data', '')).lower():
+            for cache_key, cache_entry in self._cache.items():
+                # Match pattern against the stored query string
+                cached_query = cache_entry.get('query', '')
+                if pattern.lower() in cached_query.lower():
                     keys_to_remove.append(cache_key)
+                    self.logger.debug(f"Found cache entry to invalidate: query contains '{pattern}'")
 
             for key in keys_to_remove:
                 if key in self._cache:

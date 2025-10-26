@@ -53,18 +53,71 @@ class ExpeditionEncryption:
         self.logger = logging.getLogger(__name__)
         self._backend = default_backend()
 
-    def generate_owner_key(self, expedition_id: int, owner_user_id: int) -> str:
+    def generate_user_master_key(self, owner_chat_id: int) -> str:
+        """
+        Generate a SINGLE master key for a user (based on chat_id).
+        This key will be used for ALL expeditions owned by this user.
+
+        Args:
+            owner_chat_id: Owner's Telegram chat ID
+
+        Returns:
+            Base64-encoded master key (consistent for this user)
+        """
+        try:
+            # Create a deterministic seed from the user's chat_id
+            # Using a fixed secret to ensure the same chat_id always produces the same key
+            seed_data = f"user_master_key_v1_{owner_chat_id}"
+            seed_bytes = seed_data.encode('utf-8')
+
+            # Generate a fixed salt based on chat_id (deterministic)
+            # This ensures the same chat_id always produces the same master key
+            salt_seed = f"salt_for_user_{owner_chat_id}_v1"
+            salt = hashlib.sha256(salt_seed.encode('utf-8')).digest()  # 256-bit deterministic salt
+
+            # Generate a strong key using PBKDF2 with deterministic inputs
+            kdf = PBKDF2HMAC(
+                algorithm=hashes.SHA256(),
+                length=32,  # 256-bit key
+                salt=salt,
+                iterations=100000,  # Strong iteration count
+                backend=self._backend
+            )
+
+            key = kdf.derive(seed_bytes)
+
+            # Combine salt and key for storage
+            key_data = salt + key
+            encoded_key = base64.urlsafe_b64encode(key_data).decode('utf-8')
+
+            self.logger.info(f"Generated user master key for chat_id {owner_chat_id}")
+            return encoded_key
+
+        except Exception as e:
+            self.logger.error(f"Failed to generate user master key: {e}", exc_info=True)
+            raise EncryptionError(f"User master key generation failed: {str(e)}")
+
+    def generate_owner_key(self, expedition_id: int, owner_user_id: int, use_master_key: bool = True) -> str:
         """
         Generate a secure owner key for expedition encryption.
 
+        By default, uses the user's master key (consistent across all expeditions).
+        Can optionally generate per-expedition keys for backward compatibility.
+
         Args:
             expedition_id: Expedition identifier
-            owner_user_id: Owner's user ID
+            owner_user_id: Owner's user ID (chat_id)
+            use_master_key: If True, returns the user's master key (default)
 
         Returns:
             Base64-encoded owner key
         """
         try:
+            if use_master_key:
+                # Use the user's master key (consistent for all their expeditions)
+                return self.generate_user_master_key(owner_user_id)
+
+            # Legacy mode: Generate per-expedition key (with randomness)
             # Create a unique seed from expedition and owner data
             seed_data = f"expedition_{expedition_id}_owner_{owner_user_id}_{secrets.token_hex(16)}"
             seed_bytes = seed_data.encode('utf-8')
@@ -205,7 +258,7 @@ class ExpeditionEncryption:
                 raise EncryptionError("Invalid decrypted data structure")
 
             self.logger.info(f"Decrypted name mapping for expedition {mapping_data['expedition_id']}")
-            return mapping_data['mapping']
+            return mapping_data  # Return full mapping_data, not just the mapping
 
         except Exception as e:
             self.logger.error(f"Decryption failed: {e}", exc_info=True)

@@ -62,6 +62,7 @@ class Expedition:
     deadline: Optional[datetime] = None
     created_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    owner_key: Optional[str] = None
 
     @classmethod
     def from_db_row(cls, row: tuple) -> 'Expedition':
@@ -69,7 +70,14 @@ class Expedition:
         if not row:
             return None
 
-        id_, name, owner_chat_id, status, deadline, created_at, completed_at = row
+        # Handle both 7-field (old) and 8-field (new with owner_key) rows
+        if len(row) == 8:
+            id_, name, owner_chat_id, status, deadline, created_at, completed_at, owner_key = row
+        else:
+            # Backward compatibility for 7-field rows
+            id_, name, owner_chat_id, status, deadline, created_at, completed_at = row
+            owner_key = None
+
         return cls(
             id=id_,
             name=name,
@@ -77,7 +85,8 @@ class Expedition:
             status=ExpeditionStatus.from_string(status),
             deadline=deadline,
             created_at=created_at,
-            completed_at=completed_at
+            completed_at=completed_at,
+            owner_key=owner_key
         )
 
     def to_dict(self) -> dict:
@@ -389,6 +398,7 @@ class ItemConsumptionWithProduct:
     """Item consumption with product details for API responses."""
     id: int
     consumer_name: str
+    pirate_name: str
     product_name: str
     quantity: int
     unit_price: Decimal
@@ -400,19 +410,20 @@ class ItemConsumptionWithProduct:
     @classmethod
     def from_db_row(cls, row: tuple) -> 'ItemConsumptionWithProduct':
         """Create from database row with product join."""
-        if not row or len(row) < 9:
+        if not row or len(row) < 10:
             return None
 
         return cls(
             id=row[0],
             consumer_name=row[1],
-            product_name=row[2],
-            quantity=row[3],
-            unit_price=Decimal(str(row[4])),
-            total_price=Decimal(str(row[5])),
-            amount_paid=Decimal(str(row[6])) if row[6] is not None else Decimal('0.00'),
-            payment_status=PaymentStatus.from_string(row[7]),
-            consumed_at=row[8]
+            pirate_name=row[2],
+            product_name=row[3],
+            quantity=row[4],
+            unit_price=Decimal(str(row[5])),
+            total_price=Decimal(str(row[6])),
+            amount_paid=Decimal(str(row[7])) if row[7] is not None else Decimal('0.00'),
+            payment_status=PaymentStatus.from_string(row[8]),
+            consumed_at=row[9]
         )
 
     def to_dict(self) -> dict:
@@ -420,6 +431,7 @@ class ItemConsumptionWithProduct:
         return {
             'id': self.id,
             'consumer_name': self.consumer_name,
+            'pirate_name': self.pirate_name,
             'product_name': self.product_name,
             'quantity': self.quantity,
             'unit_price': float(self.unit_price),

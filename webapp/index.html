@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/pirate-logo.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#8B4513" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Pirates Expedition" />
+
+    <title>Pirates Expedition Mini App</title>
+
+    <!-- Telegram WebApp script - MUST be loaded first -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <!-- Preload fonts for pirate theme -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Pirata+One&family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+
+    <!-- CSS Reset and Base Styles -->
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html, body, #root {
+        height: 100%;
+        width: 100%;
+        overflow-x: hidden;
+      }
+
+      body {
+        font-family: 'Roboto', sans-serif;
+        background: var(--tg-theme-bg-color, #F5DEB3);
+        color: var(--tg-theme-text-color, #8B4513);
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      #root {
+        min-height: 100vh;
+        min-height: 100dvh;
+      }
+
+      /* CSS Variables for Pirate Theme */
+      :root {
+        --pirate-brown: #8B4513;
+        --pirate-gold: #DAA520;
+        --pirate-crimson: #DC143C;
+        --pirate-green: #228B22;
+        --pirate-blue: #4682B4;
+        --parchment: #F5DEB3;
+        --dark-brown: #654321;
+        --light-gold: #F4E4BC;
+
+        /* Telegram theme fallbacks */
+        --tg-color-scheme: light;
+        --tg-theme-bg-color: #F5DEB3;
+        --tg-theme-text-color: #8B4513;
+        --tg-theme-hint-color: #999;
+        --tg-theme-link-color: #DAA520;
+        --tg-theme-button-color: #8B4513;
+        --tg-theme-button-text-color: #F5DEB3;
+        --tg-theme-secondary-bg-color: #F4E4BC;
+      }
+
+      /* Loading animation */
+      .loading-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: var(--parchment);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+      }
+
+      .loading-logo {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        animation: float 2s ease-in-out infinite;
+      }
+
+      .loading-text {
+        font-family: 'Pirata One', cursive;
+        font-size: 1.5rem;
+        color: var(--pirate-brown);
+        margin-bottom: 2rem;
+      }
+
+      .loading-spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid var(--light-gold);
+        border-top: 3px solid var(--pirate-gold);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes float {
+        0%, 100% { transform: translateY(0px); }
+        50% { transform: translateY(-10px); }
+      }
+
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+
+      /* Pirate theme animations */
+      @keyframes sparkle {
+        0%, 100% { transform: scale(1) rotate(0deg); opacity: 1; }
+        50% { transform: scale(1.1) rotate(180deg); opacity: 0.8; }
+      }
+
+      @keyframes sway {
+        0%, 100% { transform: rotate(-2deg); }
+        50% { transform: rotate(2deg); }
+      }
+
+      @keyframes wave {
+        0%, 100% { transform: translateX(0); }
+        25% { transform: translateX(-5px); }
+        75% { transform: translateX(5px); }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <!-- Loading screen -->
+      <div class="loading-container" id="loading-screen">
+        <div class="loading-logo">⛵</div>
+        <div class="loading-text">Setting Sail...</div>
+        <div class="loading-spinner"></div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

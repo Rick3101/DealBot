@@ -1,0 +1,49 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="pirateGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#DAA520;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8B4513;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Ship Hull -->
+  <path d="M100 350 Q256 280 412 350 L412 380 Q256 310 100 380 Z" fill="url(#pirateGradient)"/>
+
+  <!-- Ship Deck -->
+  <rect x="120" y="340" width="272" height="20" rx="10" fill="#654321"/>
+
+  <!-- Main Mast -->
+  <rect x="250" y="150" width="12" height="200" fill="#8B4513"/>
+
+  <!-- Main Sail -->
+  <path d="M150 180 Q200 160 250 180 L250 300 Q200 320 150 300 Z" fill="#F5DEB3" stroke="#8B4513" stroke-width="2"/>
+
+  <!-- Pirate Flag -->
+  <rect x="260" y="150" width="80" height="50" fill="#000" rx="5"/>
+  <circle cx="285" cy="165" r="3" fill="#FFF"/>
+  <circle cx="315" cy="165" r="3" fill="#FFF"/>
+  <path d="M275 180 Q300 185 325 180" stroke="#FFF" stroke-width="2" fill="none"/>
+  <path d="M285 175 L285 190 M305 175 L305 190" stroke="#FFF" stroke-width="2"/>
+
+  <!-- Secondary Mast -->
+  <rect x="180" y="180" width="8" height="140" fill="#8B4513"/>
+
+  <!-- Secondary Sail -->
+  <path d="M120 200 Q150 190 180 200 L180 280 Q150 290 120 280 Z" fill="#F5DEB3" stroke="#8B4513" stroke-width="2"/>
+
+  <!-- Crow's Nest -->
+  <ellipse cx="256" cy="160" rx="15" ry="8" fill="#654321"/>
+
+  <!-- Ship Details -->
+  <circle cx="150" cy="350" r="5" fill="#DAA520"/>
+  <circle cx="200" cy="350" r="5" fill="#DAA520"/>
+  <circle cx="250" cy="350" r="5" fill="#DAA520"/>
+  <circle cx="300" cy="350" r="5" fill="#DAA520"/>
+  <circle cx="350" cy="350" r="5" fill="#DAA520"/>
+
+  <!-- Waves -->
+  <path d="M50 400 Q100 390 150 400 Q200 410 250 400 Q300 390 350 400 Q400 410 450 400"
+        stroke="#4682B4" stroke-width="3" fill="none"/>
+  <path d="M60 420 Q110 410 160 420 Q210 430 260 420 Q310 410 360 420 Q410 430 460 420"
+        stroke="#4682B4" stroke-width="2" fill="none" opacity="0.7"/>
+</svg>

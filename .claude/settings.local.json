@@ -39,7 +39,12 @@
       "Bash(more:*)",
       "Bash(if exist bot.log.2 type bot.log.2)",
       "Bash(if exist bot.log type bot.log)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git rm:*)",
+      "Read(//c/Users/rikrd/source/repos/**)",
+      "Bash(if exist \"migrations\\backups\" dir /b \"migrations\\backups\")",
+      "Bash(iconv:*)",
+      "Bash(if exist .env type .env)"
     ],
     "deny": [],
     "ask": []

@@ -1,0 +1,62 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info
+.eggs
+.pytest_cache
+htmlcov
+.coverage
+.tox
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+bot.log*
+
+# Node modules (will be installed in Docker)
+webapp/node_modules
+
+# Build output (will be built in Docker)
+webapp/dist
+
+# Documentation
+ai_docs/
+specs/
+*.md
+!README.md
+
+# Claude
+.claude/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Test files
+tests/
+htmlcov/
+
+# Environment files (use environment variables instead)
+.env

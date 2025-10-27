@@ -12,23 +12,23 @@ WORKDIR /app
 
 # Copia arquivos de dependências primeiro (melhor cache)
 COPY requirements.txt .
-COPY webapp/package*.json webapp/
 
 # Instala dependências Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Instala dependências Node.js
-RUN cd webapp && npm install
-
-# Copia o resto dos arquivos
+# Copia o resto dos arquivos (incluindo webapp completo)
 COPY . .
 
-# Build do webapp
-RUN cd webapp && npm run build
-
-# Copia script de entrypoint
-COPY docker-entrypoint.sh /app/
+# Torna o script de entrypoint executável
 RUN chmod +x /app/docker-entrypoint.sh
+
+# Instala dependências Node.js e build webapp
+WORKDIR /app/webapp
+RUN npm install
+RUN npm run build
+
+# Volta para diretório raiz
+WORKDIR /app
 
 # Expõe a porta (Render usa variável $PORT)
 EXPOSE 5000

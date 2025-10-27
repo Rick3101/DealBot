@@ -5,7 +5,7 @@ import path from 'path'
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  base: '/',
+  base: '/webapp/',
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -32,16 +32,16 @@ export default defineConfig({
         background_color: '#F5DEB3',
         display: 'standalone',
         orientation: 'portrait',
-        scope: '/',
-        start_url: '/',
+        scope: '/webapp/',
+        start_url: '/webapp/',
         icons: [
           {
-            src: '/pirate-icon-192.png',
+            src: '/webapp/pirate-icon-192.png',
             sizes: '192x192',
             type: 'image/png'
           },
           {
-            src: '/pirate-icon-512.png',
+            src: '/webapp/pirate-icon-512.png',
             sizes: '512x512',
             type: 'image/png'
           }

@@ -1,4 +1,5 @@
 # Usa Python 3.10 with Node.js for webapp build
+# Build version: 2025-10-26-v2 (force rebuild with polyfill)
 FROM python:3.10-slim
 
 # Instala Node.js para build do webapp
@@ -24,9 +25,9 @@ RUN chmod +x /app/docker-entrypoint.sh
 
 # Instala dependências Node.js e build webapp
 WORKDIR /app/webapp
-# Remove any existing dist folder to ensure clean build
-RUN rm -rf dist
-RUN npm install
+# Remove any existing dist and node_modules to ensure clean build
+RUN rm -rf dist node_modules
+RUN npm install --no-cache
 RUN npm run build
 
 # Volta para diretório raiz

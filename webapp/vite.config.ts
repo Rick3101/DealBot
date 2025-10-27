@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { VitePWA } from 'vite-plugin-pwa'
+// import { VitePWA } from 'vite-plugin-pwa' // Disabled for Telegram Mini Apps
 import path from 'path'
 
 // https://vitejs.dev/config/
@@ -13,41 +13,42 @@ export default defineConfig({
   },
   plugins: [
     react(),
-    VitePWA({
-      registerType: 'autoUpdate',
-      injectRegister: 'auto',
-      devOptions: {
-        enabled: false, // Disable PWA in development to avoid caching issues
-      },
-      workbox: {
-        clientsClaim: true,
-        skipWaiting: true,
-        cleanupOutdatedCaches: true,
-      },
-      manifest: {
-        name: 'Pirates Expedition Mini App',
-        short_name: 'Pirates Expedition',
-        description: 'Telegram Mini App for Pirates Expedition Management',
-        theme_color: '#8B4513',
-        background_color: '#F5DEB3',
-        display: 'standalone',
-        orientation: 'portrait',
-        scope: '/webapp/',
-        start_url: '/webapp/',
-        icons: [
-          {
-            src: '/webapp/pirate-icon-192.png',
-            sizes: '192x192',
-            type: 'image/png'
-          },
-          {
-            src: '/webapp/pirate-icon-512.png',
-            sizes: '512x512',
-            type: 'image/png'
-          }
-        ]
-      }
-    })
+    // PWA disabled for Telegram Mini Apps - service workers can interfere with Telegram's iframe
+    // VitePWA({
+    //   registerType: 'autoUpdate',
+    //   injectRegister: false,
+    //   devOptions: {
+    //     enabled: false,
+    //   },
+    //   workbox: {
+    //     clientsClaim: true,
+    //     skipWaiting: true,
+    //     cleanupOutdatedCaches: true,
+    //   },
+    //   manifest: {
+    //     name: 'Pirates Expedition Mini App',
+    //     short_name: 'Pirates Expedition',
+    //     description: 'Telegram Mini App for Pirates Expedition Management',
+    //     theme_color: '#8B4513',
+    //     background_color: '#F5DEB3',
+    //     display: 'standalone',
+    //     orientation: 'portrait',
+    //     scope: '/webapp/',
+    //     start_url: '/webapp/',
+    //     icons: [
+    //       {
+    //         src: '/webapp/pirate-icon-192.png',
+    //         sizes: '192x192',
+    //         type: 'image/png'
+    //       },
+    //       {
+    //         src: '/webapp/pirate-icon-512.png',
+    //         sizes: '512x512',
+    //         type: 'image/png'
+    //       }
+    //     ]
+    //   }
+    // })
   ],
   define: {
     global: 'globalThis',

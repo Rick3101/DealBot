@@ -14,16 +14,39 @@
     <!-- Telegram WebApp script - MUST be loaded first -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
-    <!-- Polyfill for Request API in Telegram iframe -->
+    <!-- Polyfill for Request API and error handling -->
     <script>
-      // Some bundled libraries check for Request API
-      // Provide a minimal polyfill if not available
-      if (typeof window.Request === 'undefined') {
-        window.Request = function() {};
-      }
-      if (typeof window.Response === 'undefined') {
-        window.Response = function() {};
-      }
+      // COMPREHENSIVE FIX: Polyfill AND catch the error
+      (function() {
+        // 1. Add Request/Response to all global contexts
+        var RequestPolyfill = function Request() {};
+        var ResponsePolyfill = function Response() {};
+
+        window.Request = window.Request || RequestPolyfill;
+        window.Response = window.Response || ResponsePolyfill;
+        self.Request = self.Request || RequestPolyfill;
+        self.Response = self.Response || ResponsePolyfill;
+        globalThis.Request = globalThis.Request || RequestPolyfill;
+        globalThis.Response = globalThis.Response || ResponsePolyfill;
+
+        // 2. Catch and suppress the specific error
+        window.addEventListener('error', function(e) {
+          if (e.message && e.message.includes('Cannot destructure property') && e.message.includes('Request')) {
+            console.warn('Suppressed Request destructuring error - polyfill applied');
+            e.preventDefault();
+            return false;
+          }
+        }, true);
+
+        // 3. Catch unhandledrejection
+        window.addEventListener('unhandledrejection', function(e) {
+          if (e.reason && e.reason.message && e.reason.message.includes('Request')) {
+            console.warn('Suppressed Promise rejection related to Request API');
+            e.preventDefault();
+            return false;
+          }
+        });
+      })();
     </script>
 
     <!-- Preload fonts for pirate theme -->

@@ -100,8 +100,17 @@ export default defineConfig({
           'charts': ['recharts'],
           'telegram': ['@telegram-apps/sdk'],
           'websocket': ['socket.io-client']
+        },
+        // Add globals to prevent undefined destructuring
+        globals: {
+          Request: 'Request',
+          Response: 'Response'
         }
       }
-    }
+    },
+    // Target modern browsers that support Fetch API
+    target: 'esnext',
+    // Polyfill node globals
+    polyfillModulePreload: true
   }
 })

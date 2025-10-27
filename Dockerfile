@@ -24,6 +24,8 @@ RUN chmod +x /app/docker-entrypoint.sh
 
 # Instala dependências Node.js e build webapp
 WORKDIR /app/webapp
+# Remove any existing dist folder to ensure clean build
+RUN rm -rf dist
 RUN npm install
 RUN npm run build
 

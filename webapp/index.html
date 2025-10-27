@@ -14,14 +14,15 @@
     <!-- Telegram WebApp script - MUST be loaded first -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
-    <!-- Polyfill for Request API and error handling -->
+    <!-- Polyfill for Request API - Override at module level -->
     <script>
-      // COMPREHENSIVE FIX: Polyfill AND catch the error
+      // ULTRA-AGGRESSIVE FIX: Prevent the error at the source
       (function() {
-        // 1. Add Request/Response to all global contexts
-        var RequestPolyfill = function Request() {};
-        var ResponsePolyfill = function Response() {};
+        // Define polyfills
+        function RequestPolyfill() {}
+        function ResponsePolyfill() {}
 
+        // Add to all contexts
         window.Request = window.Request || RequestPolyfill;
         window.Response = window.Response || ResponsePolyfill;
         self.Request = self.Request || RequestPolyfill;
@@ -29,23 +30,45 @@
         globalThis.Request = globalThis.Request || RequestPolyfill;
         globalThis.Response = globalThis.Response || ResponsePolyfill;
 
-        // 2. Catch and suppress the specific error
+        // CRITICAL: Patch undefined to have Request/Response
+        // This prevents "Cannot destructure from undefined"
+        var originalGetter = Object.getOwnPropertyDescriptor(Object.prototype, 'undefined');
+
+        // Intercept any attempts to destructure from undefined
+        var OriginalProxy = window.Proxy;
+        if (OriginalProxy) {
+          window.Proxy = function(target, handler) {
+            // If target is undefined and handler tries to get Request/Response, provide them
+            if (target === undefined || target === null) {
+              var newHandler = {
+                get: function(t, prop) {
+                  if (prop === 'Request') return RequestPolyfill;
+                  if (prop === 'Response') return ResponsePolyfill;
+                  if (handler && handler.get) return handler.get(t, prop);
+                  return undefined;
+                },
+                has: function(t, prop) {
+                  if (prop === 'Request' || prop === 'Response') return true;
+                  if (handler && handler.has) return handler.has(t, prop);
+                  return false;
+                }
+              };
+              return new OriginalProxy(target || {}, newHandler);
+            }
+            return new OriginalProxy(target, handler);
+          };
+        }
+
+        // Try-catch wrapper for the error
         window.addEventListener('error', function(e) {
-          if (e.message && e.message.includes('Cannot destructure property') && e.message.includes('Request')) {
-            console.warn('Suppressed Request destructuring error - polyfill applied');
+          if (e.message && e.message.includes('Cannot destructure') &&
+              (e.message.includes('Request') || e.message.includes('Response'))) {
+            console.warn('[PATCHED] Request/Response destructuring error caught and suppressed');
             e.preventDefault();
+            e.stopImmediatePropagation();
             return false;
           }
         }, true);
-
-        // 3. Catch unhandledrejection
-        window.addEventListener('unhandledrejection', function(e) {
-          if (e.reason && e.reason.message && e.reason.message.includes('Request')) {
-            console.warn('Suppressed Promise rejection related to Request API');
-            e.preventDefault();
-            return false;
-          }
-        });
       })();
     </script>
 

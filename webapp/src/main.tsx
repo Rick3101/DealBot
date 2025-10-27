@@ -178,33 +178,35 @@ if (document.readyState === 'loading') {
   initApp();
 }
 
-// Service Worker registration for PWA (optional)
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker
-      .register('/sw.js')
-      .then((registration) => {
-        console.log('SW registered: ', registration);
-      })
-      .catch((registrationError) => {
-        console.log('SW registration failed: ', registrationError);
-      });
-  });
-}
+// Service Worker registration DISABLED for Telegram Mini Apps
+// Telegram iframe environment doesn't support service workers properly
+// if ('serviceWorker' in navigator && import.meta.env.PROD) {
+//   window.addEventListener('load', () => {
+//     navigator.serviceWorker
+//       .register('/sw.js')
+//       .then((registration) => {
+//         console.log('SW registered: ', registration);
+//       })
+//       .catch((registrationError) => {
+//         console.log('SW registration failed: ', registrationError);
+//       });
+//   });
+// }
 
-// Performance monitoring
-if (import.meta.env.PROD) {
-  // Monitor web vitals - using dynamic access for compatibility
-  import('web-vitals').then((webVitals: any) => {
-    ['onCLS', 'onFID', 'onFCP', 'onLCP', 'onTTFB'].forEach(metric => {
-      if (webVitals[metric]) {
-        webVitals[metric](console.log);
-      }
-    });
-  }).catch(() => {
-    // web-vitals not available
-  });
-}
+// Performance monitoring DISABLED for Telegram Mini Apps
+// web-vitals library tries to access Request API which may not be available
+// if (import.meta.env.PROD) {
+//   // Monitor web vitals - using dynamic access for compatibility
+//   import('web-vitals').then((webVitals: any) => {
+//     ['onCLS', 'onFID', 'onFCP', 'onLCP', 'onTTFB'].forEach(metric => {
+//       if (webVitals[metric]) {
+//         webVitals[metric](console.log);
+//       }
+//     });
+//   }).catch(() => {
+//     // web-vitals not available
+//   });
+// }
 
 // Handle unhandled errors
 window.addEventListener('error', (event) => {

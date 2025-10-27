@@ -14,61 +14,107 @@
     <!-- Telegram WebApp script - MUST be loaded first -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
-    <!-- Polyfill for Request API - Override at module level -->
+    <!-- Critical Polyfill for Request/Response/Headers API -->
+    <!-- This MUST load before any bundled modules to prevent destructuring errors -->
     <script>
-      // ULTRA-AGGRESSIVE FIX: Prevent the error at the source
       (function() {
-        // Define polyfills
-        function RequestPolyfill() {}
-        function ResponsePolyfill() {}
+        'use strict';
 
-        // Add to all contexts
-        window.Request = window.Request || RequestPolyfill;
-        window.Response = window.Response || ResponsePolyfill;
-        self.Request = self.Request || RequestPolyfill;
-        self.Response = self.Response || ResponsePolyfill;
-        globalThis.Request = globalThis.Request || RequestPolyfill;
-        globalThis.Response = globalThis.Response || ResponsePolyfill;
-
-        // CRITICAL: Patch undefined to have Request/Response
-        // This prevents "Cannot destructure from undefined"
-        var originalGetter = Object.getOwnPropertyDescriptor(Object.prototype, 'undefined');
-
-        // Intercept any attempts to destructure from undefined
-        var OriginalProxy = window.Proxy;
-        if (OriginalProxy) {
-          window.Proxy = function(target, handler) {
-            // If target is undefined and handler tries to get Request/Response, provide them
-            if (target === undefined || target === null) {
-              var newHandler = {
-                get: function(t, prop) {
-                  if (prop === 'Request') return RequestPolyfill;
-                  if (prop === 'Response') return ResponsePolyfill;
-                  if (handler && handler.get) return handler.get(t, prop);
-                  return undefined;
-                },
-                has: function(t, prop) {
-                  if (prop === 'Request' || prop === 'Response') return true;
-                  if (handler && handler.has) return handler.has(t, prop);
-                  return false;
-                }
-              };
-              return new OriginalProxy(target || {}, newHandler);
-            }
-            return new OriginalProxy(target, handler);
-          };
+        // Create minimal but functional polyfills for Fetch API
+        function RequestPolyfill(input, init) {
+          this.url = typeof input === 'string' ? input : (input && input.url) || '';
+          this.method = (init && init.method) || 'GET';
+          this.headers = (init && init.headers) || {};
+          this.body = (init && init.body) || null;
+          this.mode = (init && init.mode) || 'cors';
+          this.credentials = (init && init.credentials) || 'same-origin';
+          this.cache = (init && init.cache) || 'default';
+          this.redirect = (init && init.redirect) || 'follow';
+          this.referrer = (init && init.referrer) || 'about:client';
+          this.integrity = (init && init.integrity) || '';
         }
 
-        // Try-catch wrapper for the error
-        window.addEventListener('error', function(e) {
-          if (e.message && e.message.includes('Cannot destructure') &&
-              (e.message.includes('Request') || e.message.includes('Response'))) {
-            console.warn('[PATCHED] Request/Response destructuring error caught and suppressed');
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            return false;
+        function ResponsePolyfill(body, init) {
+          this.body = body || null;
+          this.status = (init && init.status) || 200;
+          this.statusText = (init && init.statusText) || 'OK';
+          this.headers = (init && init.headers) || {};
+          this.ok = this.status >= 200 && this.status < 300;
+          this.redirected = false;
+          this.type = 'basic';
+          this.url = '';
+        }
+
+        // Headers implementation
+        function HeadersPolyfill(init) {
+          this._headers = {};
+          if (init) {
+            if (typeof init === 'object') {
+              for (var key in init) {
+                if (init.hasOwnProperty(key)) {
+                  this._headers[key.toLowerCase()] = String(init[key]);
+                }
+              }
+            }
           }
-        }, true);
+        }
+
+        HeadersPolyfill.prototype.get = function(name) {
+          return this._headers[name.toLowerCase()] || null;
+        };
+
+        HeadersPolyfill.prototype.set = function(name, value) {
+          this._headers[name.toLowerCase()] = String(value);
+        };
+
+        HeadersPolyfill.prototype.has = function(name) {
+          return this._headers.hasOwnProperty(name.toLowerCase());
+        };
+
+        HeadersPolyfill.prototype.delete = function(name) {
+          delete this._headers[name.toLowerCase()];
+        };
+
+        HeadersPolyfill.prototype.append = function(name, value) {
+          var existing = this.get(name);
+          if (existing) {
+            this.set(name, existing + ', ' + value);
+          } else {
+            this.set(name, value);
+          }
+        };
+
+        // Only add polyfills if not already available
+        if (typeof window.Request === 'undefined') {
+          window.Request = RequestPolyfill;
+          console.log('[Polyfill] Request API added');
+        }
+
+        if (typeof window.Response === 'undefined') {
+          window.Response = ResponsePolyfill;
+          console.log('[Polyfill] Response API added');
+        }
+
+        if (typeof window.Headers === 'undefined') {
+          window.Headers = HeadersPolyfill;
+          console.log('[Polyfill] Headers API added');
+        }
+
+        // Ensure they exist in all JavaScript contexts
+        self.Request = self.Request || window.Request;
+        self.Response = self.Response || window.Response;
+        self.Headers = self.Headers || window.Headers;
+
+        globalThis.Request = globalThis.Request || window.Request;
+        globalThis.Response = globalThis.Response || window.Response;
+        globalThis.Headers = globalThis.Headers || window.Headers;
+
+        console.log('[Polyfill] Fetch API availability:', {
+          Request: typeof window.Request,
+          Response: typeof window.Response,
+          Headers: typeof window.Headers,
+          fetch: typeof window.fetch
+        });
       })();
     </script>
 

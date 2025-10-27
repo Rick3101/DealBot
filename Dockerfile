@@ -1,5 +1,5 @@
 # Usa Python 3.10 with Node.js for webapp build
-# Build version: 2025-10-26-v2 (force rebuild with polyfill)
+# Build version: 2025-10-27-v3 (comprehensive Fetch API polyfill)
 FROM python:3.10-slim
 
 # Instala Node.js para build do webapp

@@ -88,7 +88,7 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: false,
+    sourcemap: true,
     commonjsOptions: {
       transformMixedEsModules: true,
     },

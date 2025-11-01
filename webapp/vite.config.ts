@@ -5,7 +5,7 @@ import path from 'path'
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  base: '/webapp/',
+  base: '/',
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -53,7 +53,6 @@ export default defineConfig({
   define: {
     global: 'globalThis',
     'process.env': {},
-    'import.meta.env.VITE_API_URL': JSON.stringify(process.env.VITE_API_URL || ''),
   },
   optimizeDeps: {
     esbuildOptions: {

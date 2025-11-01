@@ -45,7 +45,9 @@
       "Bash(if exist \"migrations\\backups\" dir /b \"migrations\\backups\")",
       "Bash(iconv:*)",
       "Bash(if exist .env type .env)",
-      "Bash(npm run type-check:*)"
+      "Bash(npm run type-check:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,7 +1,33 @@
-import { defineConfig } from 'vite'
+import { defineConfig, Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 // import { VitePWA } from 'vite-plugin-pwa' // Disabled for Telegram Mini Apps
 import path from 'path'
+
+/**
+ * Plugin to ensure polyfills are loaded first for Render deployment
+ * This is critical for Telegram Mini App environment
+ */
+function injectPolyfillPlugin(): Plugin {
+  return {
+    name: 'inject-polyfill-first',
+    enforce: 'pre',
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html: string) {
+        // Ensure polyfill script is the very first script in <head>
+        // This prevents "Cannot destructure 'Request' of undefined" errors
+        // in Telegram's WebView on Render
+        if (!html.includes('src="/polyfills.js"')) {
+          html = html.replace(
+            '<head>',
+            '<head>\n    <!-- CRITICAL: Polyfill injected by Vite for Render deployment -->\n    <script src="/polyfills.js"></script>'
+          );
+        }
+        return html;
+      },
+    },
+  };
+}
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -12,6 +38,7 @@ export default defineConfig({
     },
   },
   plugins: [
+    // injectPolyfillPlugin(), // Temporarily disabled to debug build error
     react(),
     // PWA disabled for Telegram Mini Apps - service workers can interfere with Telegram's iframe
     // VitePWA({
@@ -110,6 +137,8 @@ export default defineConfig({
     // Target modern browsers that support Fetch API
     target: 'esnext',
     // Polyfill node globals
-    polyfillModulePreload: true
+    modulePreload: {
+      polyfill: true
+    }
   }
 })

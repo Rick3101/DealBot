@@ -1,5 +1,8 @@
 # Environment variables
 .env
+.env.*
+webapp/.env
+webapp/.env.*
 
 # Python cache
 __pycache__/
@@ -71,6 +74,20 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Node.js / Webapp
+node_modules/
+webapp/node_modules/
+webapp/dist/
+webapp/build/
+webapp/.vite/
+webapp/coverage/
+webapp/build.log
+webapp/test_output.txt
+webapp/check-logs.html
+*.tsbuildinfo
+.npm
+.eslintcache
 
 .claude/
 DEPLOY_NOW.md

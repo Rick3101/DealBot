@@ -1,3 +1,6 @@
+// CRITICAL: Import polyfills FIRST before any other imports
+import './polyfills/fetch-polyfill';
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';

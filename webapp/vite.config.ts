@@ -2,6 +2,28 @@ import { defineConfig, Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 // import { VitePWA } from 'vite-plugin-pwa' // Disabled for Telegram Mini Apps
 import path from 'path'
+import fs from 'fs'
+
+/**
+ * Plugin to copy polyfills.js to dist folder
+ * Alternative to vite-plugin-static-copy for ESM compatibility
+ */
+function copyPolyfillsPlugin(): Plugin {
+  return {
+    name: 'copy-polyfills',
+    closeBundle() {
+      const src = path.resolve(__dirname, 'public/polyfills.js')
+      const dest = path.resolve(__dirname, 'dist/polyfills.js')
+
+      if (fs.existsSync(src)) {
+        fs.copyFileSync(src, dest)
+        console.log('[Vite] Copied polyfills.js to dist/')
+      } else {
+        console.warn('[Vite] Warning: polyfills.js not found in public/')
+      }
+    }
+  }
+}
 
 /**
  * Plugin to ensure polyfills are loaded first for Render deployment
@@ -17,10 +39,10 @@ function injectPolyfillPlugin(): Plugin {
         // Ensure polyfill script is the very first script in <head>
         // This prevents "Cannot destructure 'Request' of undefined" errors
         // in Telegram's WebView on Render
-        if (!html.includes('src="/polyfills.js"')) {
+        if (!html.includes('src="/webapp/polyfills.js"')) {
           html = html.replace(
             '<head>',
-            '<head>\n    <!-- CRITICAL: Polyfill injected by Vite for Render deployment -->\n    <script src="/polyfills.js"></script>'
+            '<head>\n    <!-- CRITICAL: Polyfill injected by Vite for Render deployment -->\n    <script src="/webapp/polyfills.js"></script>'
           );
         }
         return html;
@@ -38,7 +60,8 @@ export default defineConfig({
     },
   },
   plugins: [
-    // injectPolyfillPlugin(), // Temporarily disabled to debug build error
+    copyPolyfillsPlugin(),
+    injectPolyfillPlugin(),
     react(),
     // PWA disabled for Telegram Mini Apps - service workers can interfere with Telegram's iframe
     // VitePWA({

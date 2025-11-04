@@ -228,7 +228,13 @@ class MiniAppHandler(BaseHandler):
         """Get the webapp URL based on environment configuration."""
         import os
 
-        # Use RAILWAY_URL from .env file as the base URL
+        # Use WEBAPP_URL from .env file (webapp is now standalone)
+        # If not set, fall back to RAILWAY_URL/webapp for backward compatibility
+        webapp_url = os.getenv('WEBAPP_URL')
+        if webapp_url:
+            return webapp_url
+
+        # Legacy fallback: Use RAILWAY_URL from .env file as the base URL
         base_url = os.getenv('RAILWAY_URL', 'https://your-app.render.com')
         return f"{base_url}/webapp"
 

@@ -1,8 +1,6 @@
 # Environment variables
 .env
 .env.*
-webapp/.env
-webapp/.env.*
 
 # Python cache
 __pycache__/
@@ -74,17 +72,10 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+nul  # Created by Windows cmd redirects in Git Bash
 
-# Node.js / Webapp
+# Node.js (removed webapp-specific entries - webapp is standalone project)
 node_modules/
-webapp/node_modules/
-webapp/dist/
-webapp/build/
-webapp/.vite/
-webapp/coverage/
-webapp/build.log
-webapp/test_output.txt
-webapp/check-logs.html
 *.tsbuildinfo
 .npm
 .eslintcache

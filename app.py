@@ -353,48 +353,9 @@ class BotApplication:
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
 
-        # ===== MINI APP STATIC FILES SERVING =====
+        # REMOVED: Mini App static files serving (webapp moved to standalone project)
 
-        @app.route("/webapp")
-        @app.route("/webapp/")
-        def serve_webapp():
-            """Serve the Mini App index.html."""
-            try:
-                import os
-                webapp_dir = os.path.join(os.path.dirname(__file__), 'webapp', 'dist')
-                index_path = os.path.join(webapp_dir, 'index.html')
 
-                if os.path.exists(index_path):
-                    from flask import send_file
-                    return send_file(index_path)
-                else:
-                    return jsonify({
-                        "error": "Mini App not built",
-                        "message": "Run 'cd webapp && npm run build' to build the Mini App"
-                    }), 404
-            except Exception as e:
-                return jsonify({"error": f"Failed to serve Mini App: {str(e)}"}), 500
-
-        @app.route("/webapp/<path:filename>")
-        def serve_webapp_assets(filename):
-            """Serve Mini App static assets."""
-            try:
-                import os
-                from flask import send_from_directory
-
-                webapp_dir = os.path.join(os.path.dirname(__file__), 'webapp', 'dist')
-
-                if os.path.exists(webapp_dir):
-                    return send_from_directory(webapp_dir, filename)
-                else:
-                    return jsonify({
-                        "error": "Mini App not built",
-                        "message": "Run 'cd webapp && npm run build' to build the Mini App"
-                    }), 404
-            except Exception as e:
-                return jsonify({"error": f"Failed to serve asset: {str(e)}"}), 500
-        
-        
         @app.route("/api/dashboard")
         def api_dashboard():
             """API endpoint for dashboard data."""
@@ -1256,7 +1217,7 @@ class BotApplication:
         def api_brambler_get_owner_key(expedition_id: int):
             """
             API endpoint to retrieve owner key for an expedition (owner-only access).
-            Used by webapp to decrypt pirate names.
+            Used by frontend to decrypt pirate names.
             """
             try:
                 from core.modern_service_container import get_expedition_service, get_user_service

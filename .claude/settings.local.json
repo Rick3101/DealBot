@@ -48,7 +48,8 @@
       "Bash(npm run type-check:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "Bash(nul)"
+      "Bash(nul)",
+      "Bash(NUL)"
     ],
     "deny": [],
     "ask": []

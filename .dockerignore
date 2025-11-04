@@ -35,11 +35,7 @@ Thumbs.db
 *.log
 bot.log*
 
-# Node modules (will be installed in Docker)
-webapp/node_modules
-
-# Build output (will be built in Docker)
-webapp/dist
+# REMOVED: webapp is now standalone project
 
 # Documentation
 ai_docs/

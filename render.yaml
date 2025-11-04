@@ -1,12 +1,10 @@
 services:
   - type: web
-    name: dealbot-webapp
+    name: dealbot-backend
     runtime: python
     plan: free
     region: oregon
-    buildCommand: |
-      pip install -r requirements.txt
-      cd webapp && npm install && npm run build
+    buildCommand: pip install -r requirements.txt
     startCommand: gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:$PORT wsgi:app --timeout 120 --log-level info
     envVars:
       - key: ENVIRONMENT
@@ -19,3 +17,5 @@ services:
         sync: false
       - key: RAILWAY_URL
         sync: false
+      - key: WEBAPP_URL
+        sync: false  # URL of standalone webapp deployment

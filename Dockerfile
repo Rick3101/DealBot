@@ -1,12 +1,6 @@
-# Usa Python 3.10 with Node.js for webapp build
-# Build version: 2025-10-27-v3 (comprehensive Fetch API polyfill)
+# Python 3.10 slim (webapp removed - now standalone project)
+# Build version: 2025-11-03-v4 (backend only)
 FROM python:3.10-slim
-
-# Instala Node.js para build do webapp
-RUN apt-get update && apt-get install -y \
-    nodejs \
-    npm \
-    && rm -rf /var/lib/apt/lists/*
 
 # Cria diretório da aplicação
 WORKDIR /app
@@ -17,21 +11,11 @@ COPY requirements.txt .
 # Instala dependências Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia o resto dos arquivos (incluindo webapp completo)
+# Copia o resto dos arquivos
 COPY . .
 
 # Torna o script de entrypoint executável
 RUN chmod +x /app/docker-entrypoint.sh
-
-# Instala dependências Node.js e build webapp
-WORKDIR /app/webapp
-# Remove any existing dist and node_modules to ensure clean build
-RUN rm -rf dist node_modules
-RUN npm install --no-cache
-RUN npm run build
-
-# Volta para diretório raiz
-WORKDIR /app
 
 # Expõe a porta (Render usa variável $PORT)
 EXPOSE 5000

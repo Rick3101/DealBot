@@ -238,10 +238,10 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
         if not expedition.is_active():
             raise ValidationError("Cannot remove items from inactive expedition")
 
-        # Check if there are any consumptions for this item
+        # Check if there are any assignments (consumptions) for this item
         consumption_check_query = """
-            SELECT COUNT(*) FROM item_consumptions ic
-            JOIN expedition_items ei ON ic.expedition_item_id = ei.id
+            SELECT COUNT(*) FROM expedition_assignments ea
+            JOIN expedition_items ei ON ea.expedition_item_id = ei.id
             WHERE ei.expedition_id = %s AND ei.produto_id = %s
         """
 
@@ -1004,9 +1004,9 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
             raise NotFoundError(f"Expedition {expedition_id} not found")
 
         # Delete in proper order to respect foreign key constraints
+        # Note: expedition_assignments, expedition_payments, and expedition_pirates
+        # have CASCADE DELETE, so they'll be deleted automatically
         operations = [
-            ("DELETE FROM item_consumptions WHERE expedition_id = %s", (expedition_id,)),
-            ("DELETE FROM pirate_names WHERE expedition_id = %s", (expedition_id,)),
             ("DELETE FROM expedition_items WHERE expedition_id = %s", (expedition_id,)),
             ("DELETE FROM expeditions WHERE id = %s", (expedition_id,))
         ]
@@ -1018,23 +1018,18 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
         return success
 
     def update_payment_status(self, consumption_id: int, status: PaymentStatus) -> bool:
-        """Update payment status for an item consumption."""
-        # Get consumption details first
-        consumption_query = """
-            SELECT id, expedition_id, consumer_name, total_cost
-            FROM item_consumptions
-            WHERE id = %s
         """
+        DEPRECATED: Update payment status for an assignment.
+        Use pay_assignment() instead for proper payment tracking.
+        """
+        # This method is deprecated - assignments use expedition_assignments table
+        # and payments are tracked in expedition_payments table
+        # Use pay_assignment(assignment_id, amount) instead
+        self.logger.warning(f"update_payment_status is deprecated, use pay_assignment() instead")
 
-        consumption_result = self._execute_query(consumption_query, (consumption_id,), fetch_one=True)
-        if not consumption_result:
-            return False
-
-        _, expedition_id, consumer_name, total_cost = consumption_result
-
-        # Update the payment status
+        # Update the assignment payment status
         query = """
-            UPDATE item_consumptions
+            UPDATE expedition_assignments
             SET payment_status = %s
             WHERE id = %s
         """
@@ -1080,36 +1075,60 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
         return rows_affected > 0
 
     def get_unpaid_consumptions(self, consumer_name: Optional[str] = None) -> List[ItemConsumptionResponse]:
-        """Get unpaid item consumptions, optionally filtered by consumer."""
+        """Get unpaid assignments (consumptions), optionally filtered by consumer."""
         base_query = """
-            SELECT ic.id, ic.expedition_id, ic.expedition_item_id, ic.consumer_name, ic.pirate_name,
-                   ic.quantity_consumed, ic.unit_price, ic.total_cost, ic.amount_paid, ic.payment_status, ic.consumed_at,
-                   e.name as expedition_name, p.name as product_name
-            FROM item_consumptions ic
-            JOIN expeditions e ON ic.expedition_id = e.id
-            JOIN expedition_items ei ON ic.expedition_item_id = ei.id
+            SELECT ea.id, ea.expedition_id, ea.expedition_item_id,
+                   ep.original_name as consumer_name, ep.pirate_name,
+                   ea.consumed_quantity, ea.unit_price, ea.total_cost,
+                   COALESCE(SUM(epay.payment_amount), 0) as amount_paid,
+                   ea.payment_status, ea.assigned_at,
+                   e.name as expedition_name, p.nome as product_name
+            FROM expedition_assignments ea
+            JOIN expeditions e ON ea.expedition_id = e.id
+            JOIN expedition_pirates ep ON ea.pirate_id = ep.id
+            JOIN expedition_items ei ON ea.expedition_item_id = ei.id
             JOIN produtos p ON ei.produto_id = p.id
-            WHERE ic.payment_status != %s
+            LEFT JOIN expedition_payments epay ON epay.assignment_id = ea.id AND epay.payment_status = 'completed'
+            WHERE ea.payment_status != %s
         """
 
         params = [PaymentStatus.PAID.value]
 
         if consumer_name:
-            base_query += " AND ic.consumer_name = %s"
+            base_query += " AND ep.original_name = %s"
             params.append(consumer_name)
 
-        base_query += " ORDER BY ic.consumed_at DESC"
+        base_query += """
+            GROUP BY ea.id, ea.expedition_id, ea.expedition_item_id,
+                     ep.original_name, ep.pirate_name, ea.consumed_quantity,
+                     ea.unit_price, ea.total_cost, ea.payment_status, ea.assigned_at,
+                     e.name, p.nome
+            ORDER BY ea.assigned_at DESC
+        """
 
         results = self._execute_query(base_query, tuple(params), fetch_all=True)
 
         responses = []
         for row in results or []:
-            # Parse consumption data
-            consumption_data = row[:11]  # First 11 columns are consumption fields (including amount_paid)
-            expedition_name = row[11]
-            product_name = row[12]
+            # Parse assignment data (now with aggregated amount_paid)
+            (assignment_id, expedition_id, expedition_item_id, consumer_name, pirate_name,
+             consumed_quantity, unit_price, total_cost, amount_paid, payment_status, assigned_at,
+             expedition_name, product_name) = row
 
-            consumption = ItemConsumption.from_db_row(consumption_data)
+            # Create ItemConsumption object for backward compatibility
+            consumption = ItemConsumption(
+                id=assignment_id,
+                expedition_id=expedition_id,
+                expedition_item_id=expedition_item_id,
+                consumer_name=consumer_name or pirate_name,  # Fallback to pirate_name if original_name is NULL
+                pirate_name=pirate_name,
+                quantity_consumed=consumed_quantity,
+                unit_price=Decimal(str(unit_price)),
+                total_cost=Decimal(str(total_cost)),
+                amount_paid=Decimal(str(amount_paid)) if amount_paid else Decimal('0.00'),
+                payment_status=PaymentStatus.from_string(payment_status),
+                consumed_at=assigned_at
+            )
 
             # Calculate remaining debt
             remaining_debt = consumption.total_cost - consumption.amount_paid

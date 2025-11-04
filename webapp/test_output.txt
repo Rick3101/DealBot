@@ -1,9 +1,0 @@
-
-> pirates-expedition-miniapp@1.0.0 build
-> tsc && vite build
-
-src/App.tsx(137,11): error TS2322: Type 'string' is not assignable to type 'Error'.
-src/hooks/useRealTimeUpdates.ts(54,44): error TS6133: 'rejoinAll' is declared but its value is never read.
-src/hooks/useWebSocketStatus.ts(9,30): error TS2307: Cannot find module '@/contexts/WebSocketContext' or its corresponding type declarations.
-src/hooks/useWebSocketStatus.ts(85,11): error TS6133: 'handleConnecting' is declared but its value is never read.
-src/utils/transforms/productTransforms.ts(9,25): error TS2307: Cannot find module '@/types/product' or its corresponding type declarations.

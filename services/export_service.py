@@ -69,12 +69,12 @@ class ExportService(BaseService):
             ),
             consumption_stats AS (
                 SELECT
-                    ic.expedition_id,
-                    COUNT(ic.id) as total_consumptions,
-                    COALESCE(SUM(ic.total_cost), 0) as total_consumption_value,
-                    COALESCE(SUM(CASE WHEN ic.payment_status = %s THEN ic.total_cost ELSE 0 END), 0) as total_paid_value
-                FROM item_consumptions ic
-                GROUP BY ic.expedition_id
+                    ea.expedition_id,
+                    COUNT(ea.id) as total_consumptions,
+                    COALESCE(SUM(ea.total_cost), 0) as total_consumption_value,
+                    COALESCE(SUM(CASE WHEN ea.payment_status = %s THEN ea.total_cost ELSE 0 END), 0) as total_paid_value
+                FROM expedition_assignments ea
+                GROUP BY ea.expedition_id
             )
             SELECT
                 e.id, e.name, e.owner_chat_id, e.status, e.deadline,
@@ -190,32 +190,33 @@ class ExportService(BaseService):
         params = []
 
         base_query = """
-            SELECT ic.id, ic.expedition_id, e.name as expedition_name,
-                   ic.consumer_name, ic.pirate_name, ic.quantity_consumed,
-                   ic.unit_price, ic.total_cost, ic.payment_status, ic.consumed_at,
-                   p.name as product_name, ei.quantity_required
-            FROM item_consumptions ic
-            JOIN expeditions e ON ic.expedition_id = e.id
-            JOIN expedition_items ei ON ic.expedition_item_id = ei.id
+            SELECT ea.id, ea.expedition_id, e.name as expedition_name,
+                   ep.original_name as consumer_name, ep.pirate_name, ea.consumed_quantity,
+                   ea.unit_price, ea.total_cost, ea.payment_status, ea.assigned_at,
+                   p.nome as product_name, ei.quantity_required
+            FROM expedition_assignments ea
+            JOIN expeditions e ON ea.expedition_id = e.id
+            JOIN expedition_pirates ep ON ea.pirate_id = ep.id
+            JOIN expedition_items ei ON ea.expedition_item_id = ei.id
             JOIN produtos p ON ei.produto_id = p.id
         """
 
         if expedition_id:
-            where_conditions.append("ic.expedition_id = %s")
+            where_conditions.append("ea.expedition_id = %s")
             params.append(expedition_id)
 
         if date_from:
-            where_conditions.append("ic.consumed_at >= %s")
+            where_conditions.append("ea.assigned_at >= %s")
             params.append(date_from)
 
         if date_to:
-            where_conditions.append("ic.consumed_at <= %s")
+            where_conditions.append("ea.assigned_at <= %s")
             params.append(date_to)
 
         if where_conditions:
             base_query += " WHERE " + " AND ".join(where_conditions)
 
-        base_query += " ORDER BY ic.consumed_at DESC"
+        base_query += " ORDER BY ea.assigned_at DESC"
 
         results = self._execute_query(base_query, tuple(params), fetch_all=True)
 
@@ -288,14 +289,14 @@ class ExportService(BaseService):
             ),
             consumption_metrics AS (
                 SELECT
-                    ic.expedition_id,
-                    COUNT(ic.id) as total_consumptions,
-                    COALESCE(SUM(ic.quantity_consumed), 0) as total_quantity_sold,
-                    COALESCE(SUM(ic.total_cost), 0) as total_revenue,
-                    COALESCE(SUM(CASE WHEN ic.payment_status = %s THEN ic.total_cost ELSE 0 END), 0) as total_collected,
-                    COALESCE(AVG(ic.unit_price), 0) as avg_selling_price
-                FROM item_consumptions ic
-                GROUP BY ic.expedition_id
+                    ea.expedition_id,
+                    COUNT(ea.id) as total_consumptions,
+                    COALESCE(SUM(ea.consumed_quantity), 0) as total_quantity_sold,
+                    COALESCE(SUM(ea.total_cost), 0) as total_revenue,
+                    COALESCE(SUM(CASE WHEN ea.payment_status = %s THEN ea.total_cost ELSE 0 END), 0) as total_collected,
+                    COALESCE(AVG(ea.unit_price), 0) as avg_selling_price
+                FROM expedition_assignments ea
+                GROUP BY ea.expedition_id
             ),
             cost_metrics AS (
                 SELECT
@@ -581,15 +582,16 @@ class ExportService(BaseService):
             SELECT e.id, e.name, e.owner_chat_id, e.status, e.deadline,
                    e.created_at, e.completed_at,
                    COUNT(DISTINCT ei.id) as total_items,
-                   COUNT(DISTINCT ic.id) as total_consumptions,
-                   COUNT(DISTINCT ic.consumer_name) as unique_consumers,
+                   COUNT(DISTINCT ea.id) as total_consumptions,
+                   COUNT(DISTINCT ep.original_name) as unique_consumers,
                    COALESCE(SUM(ei.quantity_required), 0) as total_required_quantity,
                    COALESCE(SUM(ei.quantity_consumed), 0) as total_consumed_quantity,
-                   COALESCE(SUM(ic.total_cost), 0) as total_revenue,
-                   COALESCE(SUM(CASE WHEN ic.payment_status = %s THEN ic.total_cost ELSE 0 END), 0) as total_collected
+                   COALESCE(SUM(ea.total_cost), 0) as total_revenue,
+                   COALESCE(SUM(CASE WHEN ea.payment_status = %s THEN ea.total_cost ELSE 0 END), 0) as total_collected
             FROM expeditions e
             LEFT JOIN expedition_items ei ON e.id = ei.expedition_id
-            LEFT JOIN item_consumptions ic ON e.id = ic.expedition_id
+            LEFT JOIN expedition_assignments ea ON e.id = ea.expedition_id
+            LEFT JOIN expedition_pirates ep ON ea.pirate_id = ep.id
             WHERE e.id IN ({placeholders})
             GROUP BY e.id, e.name, e.owner_chat_id, e.status, e.deadline, e.created_at, e.completed_at
             ORDER BY e.created_at DESC

@@ -47,7 +47,8 @@
       "Bash(if exist .env type .env)",
       "Bash(npm run type-check:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(nul)"
     ],
     "deny": [],
     "ask": []

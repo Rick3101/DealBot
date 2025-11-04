@@ -205,34 +205,9 @@ def initialize_schema():
         CONSTRAINT unique_original_product_when_not_null UNIQUE NULLS NOT DISTINCT (expedition_id, original_product_name)
     );
 
-    -- DEPRECATED: Create pirate_names table (for anonymization system)
-    -- This table is deprecated and replaced by expedition_pirates for expedition-specific names
-    -- Only used for global pirate mappings (expedition_id IS NULL) - consider using item_mappings instead
-    -- Will be removed in a future version after full migration
-    CREATE TABLE IF NOT EXISTS pirate_names (
-        id SERIAL PRIMARY KEY,
-        expedition_id INTEGER REFERENCES Expeditions(id) ON DELETE CASCADE,
-        original_name VARCHAR(100) NOT NULL,
-        pirate_name VARCHAR(100) NOT NULL,
-        encrypted_mapping TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(expedition_id, original_name)
-    );
-
-    -- Create item_consumptions table (for tracking expedition item usage)
-    CREATE TABLE IF NOT EXISTS item_consumptions (
-        id SERIAL PRIMARY KEY,
-        expedition_id INTEGER REFERENCES Expeditions(id) ON DELETE CASCADE,
-        expedition_item_id INTEGER REFERENCES expedition_items(id) ON DELETE CASCADE,
-        consumer_name VARCHAR(100) NOT NULL,
-        pirate_name VARCHAR(100) NOT NULL,
-        quantity_consumed INTEGER NOT NULL,
-        unit_price DECIMAL(10,2) NOT NULL,
-        total_cost DECIMAL(10,2) NOT NULL,
-        amount_paid DECIMAL(10,2) DEFAULT 0.00 NOT NULL,
-        payment_status VARCHAR(20) DEFAULT 'pending' CHECK (payment_status IN ('pending', 'partial', 'paid')),
-        consumed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
+    -- REMOVED: pirate_names table - replaced by expedition_pirates
+    -- REMOVED: item_consumptions table - migrated to expedition_assignments + expedition_payments
+    -- All consumption tracking now uses the assignment-based architecture
 
     -- Create item_mappings table (for global custom item/product names)
     CREATE TABLE IF NOT EXISTS item_mappings (
@@ -339,14 +314,8 @@ def initialize_schema():
     CREATE INDEX IF NOT EXISTS idx_expeditions_created ON Expeditions(created_at);
     CREATE INDEX IF NOT EXISTS idx_expeditionitems_expedition ON expedition_items(expedition_id);
     CREATE INDEX IF NOT EXISTS idx_expeditionitems_produto ON expedition_items(produto_id);
-    -- DEPRECATED: Legacy pirate_names indexes (table is deprecated, use expedition_pirates)
-    CREATE INDEX IF NOT EXISTS idx_piratenames_expedition ON pirate_names(expedition_id);
-    CREATE INDEX IF NOT EXISTS idx_piratenames_original ON pirate_names(original_name);
-    CREATE INDEX IF NOT EXISTS idx_itemconsumptions_expedition ON item_consumptions(expedition_id);
-    CREATE INDEX IF NOT EXISTS idx_itemconsumptions_expeditionitem ON item_consumptions(expedition_item_id);
-    CREATE INDEX IF NOT EXISTS idx_itemconsumptions_consumer ON item_consumptions(consumer_name);
-    CREATE INDEX IF NOT EXISTS idx_itemconsumptions_payment ON item_consumptions(payment_status);
-    CREATE INDEX IF NOT EXISTS idx_itemconsumptions_consumed ON item_consumptions(consumed_at);
+    -- REMOVED: pirate_names indexes - table removed, use expedition_pirates
+    -- REMOVED: item_consumptions indexes - table migrated to expedition_assignments
     CREATE INDEX IF NOT EXISTS idx_itemmappings_product_name ON item_mappings(product_name);
     CREATE INDEX IF NOT EXISTS idx_itemmappings_custom_name ON item_mappings(custom_name);
     CREATE INDEX IF NOT EXISTS idx_itemmappings_created_by ON item_mappings(created_by_chat_id);
@@ -361,20 +330,13 @@ def initialize_schema():
     CREATE INDEX IF NOT EXISTS idx_expeditions_active_deadline ON Expeditions(status, deadline) WHERE status = 'active';
     -- For expedition items with consumption tracking
     CREATE INDEX IF NOT EXISTS idx_expeditionitems_expedition_consumed ON expedition_items(expedition_id, quantity_consumed);
-    -- For consumption reporting - expedition + consumer + consumed_at
-    CREATE INDEX IF NOT EXISTS idx_itemconsumptions_exp_consumer_date ON item_consumptions(expedition_id, consumer_name, consumed_at DESC);
-    -- For payment tracking - payment_status + consumed_at
-    CREATE INDEX IF NOT EXISTS idx_itemconsumptions_payment_date ON item_consumptions(payment_status, consumed_at DESC);
-    -- For profit analysis - expedition + payment_status + total_cost
-    CREATE INDEX IF NOT EXISTS idx_itemconsumptions_exp_payment_cost ON item_consumptions(expedition_id, payment_status, total_cost);
+    -- REMOVED: item_consumptions composite indexes - migrated to expedition_assignments
     -- For search functionality - name pattern search
     CREATE INDEX IF NOT EXISTS idx_expeditions_name_lower ON Expeditions(LOWER(name));
-    -- DEPRECATED: Legacy pirate name lookups (use expedition_pirates)
-    CREATE INDEX IF NOT EXISTS idx_piratenames_exp_original ON pirate_names(expedition_id, original_name);
+    -- REMOVED: pirate_names composite indexes - table removed
     -- For analytics queries - expedition items with products
     CREATE INDEX IF NOT EXISTS idx_expeditionitems_produto_expedition ON expedition_items(produto_id, expedition_id);
-    -- For consumption analysis by time periods
-    CREATE INDEX IF NOT EXISTS idx_itemconsumptions_date_expedition ON item_consumptions(consumed_at DESC, expedition_id);
+    -- REMOVED: item_consumptions analytics indexes - migrated to expedition_assignments
 
     -- New indexes for expedition redesign tables
     -- Expedition pirates indexes
@@ -437,8 +399,7 @@ def initialize_schema():
     -- Additional performance indexes for common query patterns (Quick Win optimization)
     -- For expedition status filtering with owner (dashboard queries)
     CREATE INDEX IF NOT EXISTS idx_expeditions_status_owner_created ON Expeditions(status, owner_chat_id, created_at DESC);
-    -- For consumption queries with payment status (financial reports)
-    CREATE INDEX IF NOT EXISTS idx_consumptions_expedition_payment_consumed ON item_consumptions(expedition_id, payment_status, consumed_at DESC);
+    -- REMOVED: idx_consumptions_expedition_payment_consumed - table migrated to expedition_assignments
     -- For sales by expedition and buyer (debt tracking)
     CREATE INDEX IF NOT EXISTS idx_vendas_expedition_buyer ON Vendas(expedition_id, comprador) WHERE expedition_id IS NOT NULL;
     -- For unpaid sales lookup optimization
@@ -612,15 +573,7 @@ def initialize_schema():
                     cursor.execute("ALTER TABLE expedition_items ADD COLUMN created_by_chat_id BIGINT")
                     logger.info("Added created_by_chat_id column successfully")
 
-                # Handle migration for item_consumptions table payment tracking
-                # First check if the table exists
-                cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_name = 'item_consumptions'")
-                if cursor.fetchone():
-                    cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'item_consumptions' AND column_name = 'amount_paid'")
-                    if not cursor.fetchone():
-                        logger.info("Adding amount_paid column to existing item_consumptions table")
-                        cursor.execute("ALTER TABLE item_consumptions ADD COLUMN amount_paid DECIMAL(10,2) DEFAULT 0.00 NOT NULL")
-                        logger.info("Added amount_paid column successfully")
+                # REMOVED: item_consumptions table migration - table has been fully migrated to expedition_assignments
 
                 # SECURITY MIGRATION: Make original_name nullable in expedition_pirates for encryption support
                 cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_name = 'expedition_pirates'")
@@ -734,13 +687,12 @@ def health_check_schema() -> dict:
         'estoque', 'pagamentos', 'smartcontracts',
         'transacoes', 'configuracoes', 'broadcastmessages',
         'pollanswers', 'cashbalance', 'cashtransactions',
-        'expeditions', 'expedition_items', 'item_consumptions',
+        'expeditions', 'expedition_items',
         'expedition_pirates', 'expedition_assignments', 'expedition_payments',
         'item_mappings'
     ]
 
-    # Legacy table - kept for backward compatibility but not required
-    legacy_tables = ['pirate_names']
+    # No legacy tables - all have been migrated or removed
     
     db_manager = get_db_manager()
     missing_tables = []

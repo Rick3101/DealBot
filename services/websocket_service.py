@@ -149,10 +149,10 @@ class WebSocketService(BaseService, IWebSocketService):
             expedition_query = """
                 SELECT e.name, e.status, e.created_at, e.deadline, e.owner_user_id,
                        COUNT(ei.id) as total_items,
-                       COUNT(ic.id) as consumed_items
+                       COUNT(ea.id) as consumed_items
                 FROM expeditions e
                 LEFT JOIN expedition_items ei ON e.id = ei.expedition_id
-                LEFT JOIN item_consumptions ic ON ei.id = ic.expedition_item_id
+                LEFT JOIN expedition_assignments ea ON ei.id = ea.expedition_item_id
                 WHERE e.id = %s
                 GROUP BY e.id, e.name, e.status, e.created_at, e.deadline, e.owner_user_id
             """
@@ -348,13 +348,14 @@ class WebSocketService(BaseService, IWebSocketService):
                     e.created_at,
                     e.deadline,
                     COUNT(DISTINCT ei.id) as total_items,
-                    COUNT(DISTINCT ic.id) as consumed_items,
-                    COUNT(DISTINCT ic.consumer_name) as unique_consumers,
-                    SUM(CASE WHEN ic.payment_status = 'paid' THEN ic.total_cost ELSE 0 END) as paid_amount,
-                    SUM(CASE WHEN ic.payment_status = 'pending' THEN ic.total_cost ELSE 0 END) as pending_amount
+                    COUNT(DISTINCT ea.id) as consumed_items,
+                    COUNT(DISTINCT ep.original_name) as unique_consumers,
+                    SUM(CASE WHEN ea.payment_status = 'paid' THEN ea.total_cost ELSE 0 END) as paid_amount,
+                    SUM(CASE WHEN ea.payment_status = 'pending' THEN ea.total_cost ELSE 0 END) as pending_amount
                 FROM expeditions e
                 LEFT JOIN expedition_items ei ON e.id = ei.expedition_id
-                LEFT JOIN item_consumptions ic ON ei.id = ic.expedition_item_id
+                LEFT JOIN expedition_assignments ea ON ei.id = ea.expedition_item_id
+                LEFT JOIN expedition_pirates ep ON ea.pirate_id = ep.id
                 WHERE e.id = %s
                 GROUP BY e.id, e.name, e.status, e.created_at, e.deadline
             """

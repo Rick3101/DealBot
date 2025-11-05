@@ -45,9 +45,13 @@ class ProductRepository(BaseRepository):
         """
         return self.exists("nome", name, exclude_id)
 
-    def get_products_with_stock(self) -> List[dict]:
+    def get_products_with_stock(self, limit: int = None, offset: int = 0) -> List[dict]:
         """
         Get all products with their current stock information.
+
+        Args:
+            limit: Maximum number of products to return (None for all)
+            offset: Number of products to skip (for pagination)
 
         Returns:
             List of dictionaries with product and stock information
@@ -65,7 +69,12 @@ class ProductRepository(BaseRepository):
             ORDER BY p.nome
         """
 
-        rows = self._execute_query(query, fetch_all=True)
+        params = []
+        if limit is not None:
+            query += " LIMIT %s OFFSET %s"
+            params = [limit, offset]
+
+        rows = self._execute_query(query, params if params else None, fetch_all=True)
 
         products_with_stock = []
         if rows:

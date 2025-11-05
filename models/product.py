@@ -173,12 +173,23 @@ class ProductWithStock:
     average_cost: float
     average_price: float
     total_value: float
-    
+
     @property
     def is_in_stock(self) -> bool:
         """Check if product has stock available."""
         return self.total_quantity > 0
-    
+
     def get_display_info(self) -> str:
         """Get formatted display information."""
         return f"{self.product.get_display_name()} - Estoque: {self.total_quantity}"
+
+    def to_dict(self) -> dict:
+        """Convert product with stock to dictionary for API responses."""
+        return {
+            "id": self.product.id,
+            "name": self.product.nome,
+            "emoji": self.product.emoji or "",
+            "price": float(self.average_price),
+            "stock": self.total_quantity,
+            "status": "Ativo" if self.total_quantity > 0 else "Inativo"
+        }

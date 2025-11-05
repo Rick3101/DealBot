@@ -400,26 +400,33 @@ class BotApplication:
         
         @app.route("/api/products")
         def api_products():
-            """API endpoint for products data."""
+            """API endpoint for products data with pagination support."""
             try:
                 from core.modern_service_container import get_product_service
 
                 product_service = get_product_service()
-                products_with_stock = product_service.get_products_with_stock()
 
-                products = []
-                for item in products_with_stock:
-                    product = item.product
-                    products.append({
-                        "id": product.id,
-                        "name": product.nome,
-                        "emoji": product.emoji or "",
-                        "price": float(item.average_price),
-                        "stock": item.total_quantity,
-                        "status": "Ativo" if item.total_quantity > 0 else "Inativo"
-                    })
+                # Get pagination parameters with validation
+                limit = request.args.get('limit', type=int)
+                offset = request.args.get('offset', type=int, default=0)
 
-                return jsonify({"products": products})
+                # Apply max limit constraint (500 products max per request)
+                if limit is not None:
+                    limit = min(limit, 500)
+
+                # Ensure offset is non-negative
+                offset = max(0, offset)
+
+                products_with_stock = product_service.get_products_with_stock(limit=limit, offset=offset)
+
+                return jsonify({
+                    "products": [item.to_dict() for item in products_with_stock],
+                    "pagination": {
+                        "limit": limit,
+                        "offset": offset,
+                        "count": len(products_with_stock)
+                    }
+                })
             except Exception as e:
                 self.logger.error(f"Products API error: {e}", exc_info=True)
                 return jsonify({"error": "Erro ao carregar produtos"}), 500
@@ -428,72 +435,45 @@ class BotApplication:
         def api_sales():
             """API endpoint for sales data."""
             try:
-                from database import get_database_manager
-                
-                db_manager = get_database_manager()
-                
-                with db_manager.get_connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("""
-                            SELECT v.id, v.data_venda, v.comprador_nome, v.preco_total,
-                                   CASE WHEN p.valor_pago >= v.preco_total THEN 'Pago' ELSE 'Pendente' END as status,
-                                   STRING_AGG(pr.emoji || ' ' || pr.nome, ', ') as produtos
-                            FROM Vendas v
-                            LEFT JOIN Pagamentos p ON v.comprador_nome = p.usuario_nome
-                            LEFT JOIN ItensVenda iv ON v.id = iv.venda_id
-                            LEFT JOIN Produtos pr ON iv.produto_id = pr.id
-                            GROUP BY v.id, v.data_venda, v.comprador_nome, v.preco_total, p.valor_pago
-                            ORDER BY v.data_venda DESC
-                            LIMIT 50
-                        """)
-                        
-                        sales = []
-                        for row in cur.fetchall():
-                            sales.append({
-                                "id": row[0],
-                                "date": row[1].strftime("%d/%m %H:%M") if row[1] else "",
-                                "customer": row[2],
-                                "total": f"R$ {row[3]:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
-                                "status": row[4],
-                                "products": row[5] or "N/A"
-                            })
-                
-                return jsonify({"sales": sales})
+                from core.modern_service_container import get_sales_service
+
+                sales_service = get_sales_service()
+                sales = sales_service.get_sales_with_details(limit=50)
+
+                return jsonify({"sales": [sale.to_dict() for sale in sales]})
             except Exception as e:
                 self.logger.error(f"Sales API error: {e}")
                 return jsonify({"error": "Erro ao carregar vendas"}), 500
         
         @app.route("/api/users")
         def api_users():
-            """API endpoint for users data."""
+            """API endpoint for users data with pagination support."""
             try:
-                from database import get_database_manager
+                from core.modern_service_container import get_user_service
 
-                db_manager = get_database_manager()
+                user_service = get_user_service(None)
 
-                with db_manager.get_connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("""
-                            SELECT u.username, u.nivel,
-                                   COALESCE(SUM(v.preco_total), 0) as total_compras,
-                                   MAX(v.data_venda) as ultimo_acesso
-                            FROM Usuarios u
-                            LEFT JOIN Vendas v ON u.username = v.comprador_nome
-                            GROUP BY u.username, u.nivel
-                            ORDER BY total_compras DESC
-                        """)
+                # Get pagination parameters with validation
+                limit = request.args.get('limit', type=int)
+                offset = request.args.get('offset', type=int, default=0)
 
-                        users = []
-                        for row in cur.fetchall():
-                            users.append({
-                                "username": row[0],
-                                "level": row[1].capitalize() if row[1] else "User",
-                                "total_purchases": f"R$ {row[2]:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
-                                "last_access": row[3].strftime("%d/%m %H:%M") if row[3] else "Nunca",
-                                "status": "Ativo"
-                            })
+                # Apply max limit constraint (500 users max per request)
+                if limit is not None:
+                    limit = min(limit, 500)
 
-                return jsonify({"users": users})
+                # Ensure offset is non-negative
+                offset = max(0, offset)
+
+                users = user_service.get_users_with_stats(limit=limit, offset=offset)
+
+                return jsonify({
+                    "users": [user.to_dict() for user in users],
+                    "pagination": {
+                        "limit": limit,
+                        "offset": offset,
+                        "count": len(users)
+                    }
+                })
             except Exception as e:
                 self.logger.error(f"Users API error: {e}")
                 return jsonify({"error": "Erro ao carregar usuários"}), 500
@@ -552,39 +532,39 @@ class BotApplication:
                     except (ValueError, TypeError):
                         return jsonify({"error": "Invalid chat ID"}), 400
 
-                    # OPTIMIZATION: Get pagination parameters (default limit 50)
+                    # Get pagination and filter parameters
                     limit = min(int(request.args.get('limit', 50)), 500)
                     offset = int(request.args.get('offset', 0))
+                    status_filter = request.args.get('status')  # Optional: 'active', 'completed', 'cancelled'
 
-                    # Get expeditions based on permission level
+                    # Use service layer with filtering and pagination
                     self.logger.info(f"Fetching expeditions for user {chat_id} (level: {user_level.value})")
-                    if user_level.value in ['owner', 'admin']:
-                        expeditions = expedition_service.get_all_expeditions()
-                    else:
-                        expeditions = expedition_service.get_expeditions_by_owner(chat_id)
 
-                    # Apply pagination
-                    paginated_expeditions = expeditions[offset:offset+limit]
+                    # Filter by owner if not admin/owner
+                    owner_filter = None if user_level.value in ['owner', 'admin'] else chat_id
 
-                    # Convert to response format
-                    expeditions_data = []
-                    for exp in paginated_expeditions:
-                        expeditions_data.append({
-                            "id": exp.id,
-                            "name": exp.name,
-                            "owner_chat_id": exp.owner_chat_id,
-                            "status": exp.status.value,
-                            "deadline": exp.deadline.isoformat() if exp.deadline else None,
-                            "created_at": exp.created_at.isoformat() if exp.created_at else None,
-                            "completed_at": exp.completed_at.isoformat() if exp.completed_at else None
-                        })
+                    expeditions = expedition_service.get_expeditions_summary(
+                        chat_id=owner_filter,
+                        status_filter=status_filter,
+                        limit=limit,
+                        offset=offset
+                    )
+
+                    # Get total count for pagination (without limit)
+                    total_expeditions = expedition_service.get_expeditions_summary(
+                        chat_id=owner_filter,
+                        status_filter=status_filter
+                    )
+
+                    # Use model to_dict() for clean serialization
+                    expeditions_data = [exp.to_dict() for exp in expeditions]
 
                     elapsed = time.time() - start_time
                     self.logger.info(f"Expeditions GET completed in {elapsed:.3f}s")
 
                     return jsonify({
                         "expeditions": expeditions_data,
-                        "total_count": len(expeditions),
+                        "total_count": len(total_expeditions),
                         "returned_count": len(expeditions_data),
                         "limit": limit,
                         "offset": offset,
@@ -680,11 +660,14 @@ class BotApplication:
                     return jsonify({"error": "Access denied"}), 403
 
                 if request.method == "GET":
-                    # Get detailed expedition response
-                    expedition_response = expedition_service.get_expedition_response(expedition_id)
+                    # Get detailed expedition response using service layer
+                    # SECURITY: Pass chat_id for ownership verification (to conditionally include original_name)
+                    expedition_response = expedition_service.get_expedition_response(expedition_id, requesting_chat_id=chat_id)
                     if not expedition_response:
                         return jsonify({"error": "Expedition details not available"}), 500
 
+                    # Build response with proper structure for frontend compatibility
+                    # The consumptions will include original_name ONLY if requesting user is the expedition owner
                     return jsonify({
                         "id": expedition_response.expedition.id,
                         "name": expedition_response.expedition.name,
@@ -693,35 +676,8 @@ class BotApplication:
                         "deadline": expedition_response.expedition.deadline.isoformat() if expedition_response.expedition.deadline else None,
                         "created_at": expedition_response.expedition.created_at.isoformat() if expedition_response.expedition.created_at else None,
                         "completed_at": expedition_response.expedition.completed_at.isoformat() if expedition_response.expedition.completed_at else None,
-                        "items": [
-                            {
-                                "id": item.id,
-                                "product_id": item.produto_id,  # Fixed: model uses 'produto_id' not 'product_id'
-                                "product_name": item.product_name,
-                                "product_emoji": item.product_emoji,
-                                "quantity": item.quantity_needed,
-                                "quantity_needed": item.quantity_needed,
-                                "consumed": item.quantity_consumed,
-                                "available": max(0, item.quantity_needed - item.quantity_consumed),
-                                "unit_price": float(item.unit_price),
-                                "price": float(item.unit_price),
-                                "added_at": item.added_at.isoformat() if item.added_at else None
-                            } for item in expedition_response.items
-                        ],
-                        "consumptions": [
-                            {
-                                "id": consumption.id,
-                                "consumer_name": consumption.consumer_name,
-                                "pirate_name": consumption.pirate_name,
-                                "product_name": consumption.product_name,
-                                "quantity": consumption.quantity,
-                                "unit_price": float(consumption.unit_price),
-                                "total_price": float(consumption.total_price),
-                                "amount_paid": float(consumption.amount_paid),
-                                "payment_status": consumption.payment_status.value,
-                                "consumed_at": consumption.consumed_at.isoformat() if consumption.consumed_at else None
-                            } for consumption in expedition_response.consumptions
-                        ],
+                        "items": [item.to_dict() for item in expedition_response.items],
+                        "consumptions": [c.to_dict() for c in expedition_response.consumptions],
                         "progress": {
                             "total_items": expedition_response.total_items,
                             "consumed_items": expedition_response.consumed_items,
@@ -813,28 +769,15 @@ class BotApplication:
                     return jsonify({"error": "Access denied"}), 403
 
                 if request.method == "GET":
-                    # Get expedition items with product details
-                    items = expedition_service.get_expedition_items(expedition_id)
-                    items_data = []
-                    for item in items:
-                        # Get product details
-                        product = product_service.get_product_by_id(item.produto_id)
-                        if product:
-                            items_data.append({
-                                "id": item.id,
-                                "product_id": item.produto_id,
-                                "product_name": product.nome,
-                                "product_emoji": product.emoji or '',
-                                "quantity": item.quantity_required,
-                                "quantity_needed": item.quantity_required,
-                                "consumed": item.quantity_consumed,
-                                "available": max(0, item.quantity_required - item.quantity_consumed),
-                                "unit_price": float(product.preco),
-                                "price": float(product.preco),
-                                "added_at": item.created_at.isoformat() if item.created_at else None
-                            })
+                    # Use service layer to get items with product details in single query
+                    expedition_response = expedition_service.get_expedition_response(expedition_id)
+                    if not expedition_response:
+                        return jsonify({"error": "Expedition details not available"}), 500
 
-                    return jsonify({"items": items_data})
+                    # Use model to_dict() for clean serialization - already includes encrypted names
+                    return jsonify({
+                        "items": [item.to_dict() for item in expedition_response.items]
+                    })
 
                 elif request.method == "POST":
                     # Add items to expedition - only owner can add items
@@ -1071,17 +1014,7 @@ class BotApplication:
                 # Generate pirate names
                 pirate_names = brambler_service.generate_pirate_names(expedition_id, original_names)
 
-                pirate_names_data = []
-                for pirate_name in pirate_names:
-                    pirate_names_data.append({
-                        "id": pirate_name.id,
-                        "expedition_id": pirate_name.expedition_id,
-                        "original_name": pirate_name.original_name,
-                        "pirate_name": pirate_name.pirate_name,
-                        "created_at": pirate_name.created_at.isoformat() if pirate_name.created_at else None
-                    })
-
-                return jsonify({"pirate_names": pirate_names_data}), 201
+                return jsonify({"pirate_names": [pn.to_dict() for pn in pirate_names]}), 201
 
             except Exception as e:
                 import traceback
@@ -1409,6 +1342,43 @@ class BotApplication:
 
                         results = cur.fetchall()
 
+                        # ✅ OPTIMIZED: Get all recent items in a single query using window function
+                        # This eliminates N+1 query pattern
+                        cur.execute("""
+                            WITH ranked_items AS (
+                                SELECT
+                                    ea.pirate_id,
+                                    p.nome as product_name,
+                                    p.emoji as product_emoji,
+                                    ea.consumed_quantity,
+                                    ea.completed_at,
+                                    ROW_NUMBER() OVER (PARTITION BY ea.pirate_id ORDER BY ea.completed_at DESC) as rn
+                                FROM expedition_assignments ea
+                                JOIN expedition_items ei ON ea.expedition_item_id = ei.id
+                                JOIN produtos p ON ei.produto_id = p.id
+                                WHERE ea.pirate_id IN (
+                                    SELECT id FROM expedition_pirates WHERE expedition_id = %s
+                                )
+                            )
+                            SELECT pirate_id, product_name, product_emoji, consumed_quantity, completed_at
+                            FROM ranked_items
+                            WHERE rn <= 3
+                            ORDER BY pirate_id, rn
+                        """, (expedition_id,))
+
+                        # Group recent items by pirate_id for fast lookup
+                        recent_items_by_pirate = {}
+                        for item_row in cur.fetchall():
+                            pirate_id_key, product_name, product_emoji, quantity, consumed_at = item_row
+                            if pirate_id_key not in recent_items_by_pirate:
+                                recent_items_by_pirate[pirate_id_key] = []
+                            recent_items_by_pirate[pirate_id_key].append({
+                                "name": product_name,
+                                "emoji": product_emoji or "",
+                                "quantity": quantity,
+                                "consumed_at": consumed_at.isoformat() if consumed_at else None
+                            })
+
                         # Only show original names to expedition owner or system owner
                         show_original = is_owner or user_level.value == 'owner'
 
@@ -1418,31 +1388,8 @@ class BotApplication:
 
                             debt = float(total_spent or 0) - float(total_paid or 0)
 
-                            # Get recent items for this pirate (last 3 consumptions)
-                            cur.execute("""
-                                SELECT
-                                    p.nome,
-                                    p.emoji,
-                                    ea.consumed_quantity,
-                                    ea.completed_at
-                                FROM expedition_assignments ea
-                                JOIN expedition_items ei ON ea.expedition_item_id = ei.id
-                                JOIN produtos p ON ei.produto_id = p.id
-                                WHERE ea.pirate_id = %s
-                                ORDER BY ea.completed_at DESC
-                                LIMIT 3
-                            """, (pirate_id,))
-
-                            recent_items_rows = cur.fetchall()
-                            recent_items = []
-                            for item_row in recent_items_rows:
-                                product_name, product_emoji, quantity, consumed_at = item_row
-                                recent_items.append({
-                                    "name": product_name,
-                                    "emoji": product_emoji or "",
-                                    "quantity": quantity,
-                                    "consumed_at": consumed_at.isoformat() if consumed_at else None
-                                })
+                            # Get recent items from pre-fetched dictionary (no additional query!)
+                            recent_items = recent_items_by_pirate.get(pirate_id, [])
 
                             pirate_names_data.append({
                                 "id": pirate_id,
@@ -1769,9 +1716,8 @@ class BotApplication:
         def api_brambler_decrypt_items(expedition_id):
             """API endpoint to decrypt item names for a specific expedition."""
             try:
-                from core.modern_service_container import get_brambler_service, get_user_service, get_expedition_service
+                from core.modern_service_container import get_user_service, get_expedition_service
 
-                brambler_service = get_brambler_service()
                 user_service = get_user_service(None)
                 expedition_service = get_expedition_service()
 
@@ -1805,14 +1751,18 @@ class BotApplication:
                 if not owner_key:
                     return jsonify({"error": "owner_key is required"}), 400
 
-                # Decrypt item names
-                mappings = brambler_service.decrypt_item_names(expedition_id, owner_key)
+                # Use service layer to get decrypted items
+                decrypted_items = expedition_service.get_decrypted_items(expedition_id, owner_key)
 
-                return jsonify(mappings), 200
+                # Use model to_dict() for clean serialization
+                return jsonify({
+                    "items": [item.to_dict() for item in decrypted_items],
+                    "count": len(decrypted_items)
+                }), 200
 
             except Exception as e:
                 self.logger.error(f"Brambler decrypt items API error: {e}")
-                return jsonify({"error": "Decryption failed"}), 500
+                return jsonify({"error": "Decryption failed", "details": str(e)}), 500
 
         @app.route("/api/brambler/pirate/<int:pirate_id>", methods=["DELETE"])
         def api_brambler_delete_pirate(pirate_id):
@@ -1994,6 +1944,7 @@ class BotApplication:
             """API endpoint for overdue expeditions monitoring."""
             try:
                 from core.modern_service_container import get_expedition_service, get_user_service
+                from utils.api_responses import auth_required_error, permission_denied_error, validation_error
 
                 expedition_service = get_expedition_service()
                 user_service = get_user_service(None)
@@ -2001,52 +1952,53 @@ class BotApplication:
                 # Check authentication - require admin+ permission
                 chat_id = request.headers.get('X-Chat-ID')
                 if not chat_id:
-                    return jsonify({"error": "Authentication required"}), 401
+                    return auth_required_error()
 
                 try:
                     chat_id = int(chat_id)
                     user_level = user_service.get_user_permission_level(chat_id)
                     if not user_level or user_level.value not in ['owner', 'admin']:
-                        return jsonify({"error": "Admin permission required"}), 403
+                        return permission_denied_error("Admin permission required")
                 except (ValueError, TypeError):
-                    return jsonify({"error": "Invalid chat ID"}), 400
+                    return validation_error("Invalid chat ID")
 
-                # Get overdue expeditions
-                overdue_expeditions = expedition_service.get_overdue_expeditions()
+                # Get overdue expeditions with details in single optimized query
+                overdue_expeditions_data = expedition_service.get_overdue_expeditions_with_details()
 
-                current_time = datetime.now()
+                from models.expedition import Expedition, ExpeditionStatus
+                from datetime import datetime as dt
+
                 overdue_data = []
 
-                for expedition in overdue_expeditions:
-                    # Calculate how overdue
-                    days_overdue = 0
-                    alert_level = "info"
+                for exp_data in overdue_expeditions_data:
+                    # Create Expedition object to use business logic methods
+                    deadline = dt.fromisoformat(exp_data['deadline']) if exp_data.get('deadline') else None
+                    expedition = Expedition(
+                        id=exp_data['id'],
+                        name=exp_data['name'],
+                        owner_chat_id=exp_data['owner_chat_id'],
+                        status=ExpeditionStatus.from_string(exp_data['status']),
+                        deadline=deadline
+                    )
 
-                    if expedition.deadline:
-                        days_overdue = (current_time - expedition.deadline).days
-                        if days_overdue > 7:
-                            alert_level = "critical"
-                        elif days_overdue > 3:
-                            alert_level = "urgent"
-                        elif days_overdue > 1:
-                            alert_level = "warning"
+                    # Use model methods for business logic
+                    alert_level = expedition.get_alert_level()
+                    days_overdue = expedition.get_days_overdue()
 
-                    # Get expedition progress
-                    expedition_response = expedition_service.get_expedition_response(expedition.id)
-
+                    # Build response using data from optimized query
                     overdue_entry = {
-                        "id": expedition.id,
-                        "name": expedition.name,
-                        "owner_chat_id": expedition.owner_chat_id,
-                        "deadline": expedition.deadline.isoformat() if expedition.deadline else None,
+                        "id": exp_data['id'],
+                        "name": exp_data['name'],
+                        "owner_chat_id": exp_data['owner_chat_id'],
+                        "deadline": exp_data['deadline'],
                         "days_overdue": days_overdue,
                         "alert_level": alert_level,
                         "progress": {
-                            "completion_percentage": expedition_response.completion_percentage if expedition_response else 0,
-                            "total_items": expedition_response.total_items if expedition_response else 0,
-                            "remaining_items": expedition_response.remaining_items if expedition_response else 0,
-                            "total_value": float(expedition_response.total_value) if expedition_response else 0.0,
-                            "remaining_value": float(expedition_response.remaining_value) if expedition_response else 0.0
+                            "completion_percentage": exp_data['completion_percentage'],
+                            "total_items": exp_data['total_items'],
+                            "remaining_items": exp_data['remaining_items'],
+                            "total_value": exp_data['total_value'],
+                            "remaining_value": exp_data['remaining_value']
                         }
                     }
                     overdue_data.append(overdue_entry)
@@ -2060,8 +2012,9 @@ class BotApplication:
                 })
 
             except Exception as e:
+                from utils.api_responses import internal_error
                 self.logger.error(f"Dashboard overdue API error: {e}")
-                return jsonify({"error": "Internal server error"}), 500
+                return internal_error()
 
         @app.route("/api/dashboard/analytics", methods=["GET"])
         def api_dashboard_analytics():
@@ -2069,6 +2022,7 @@ class BotApplication:
             try:
                 from core.modern_service_container import get_expedition_service, get_user_service
                 from decimal import Decimal
+                from utils.api_responses import auth_required_error, permission_denied_error, validation_error
 
                 expedition_service = get_expedition_service()
                 user_service = get_user_service(None)
@@ -2076,15 +2030,15 @@ class BotApplication:
                 # Check authentication - require admin+ permission
                 chat_id = request.headers.get('X-Chat-ID')
                 if not chat_id:
-                    return jsonify({"error": "Authentication required"}), 401
+                    return auth_required_error()
 
                 try:
                     chat_id = int(chat_id)
                     user_level = user_service.get_user_permission_level(chat_id)
                     if not user_level or user_level.value not in ['owner', 'admin']:
-                        return jsonify({"error": "Admin permission required"}), 403
+                        return permission_denied_error("Admin permission required")
                 except (ValueError, TypeError):
-                    return jsonify({"error": "Invalid chat ID"}), 400
+                    return validation_error("Invalid chat ID")
 
                 # Get all expedition data in a single optimized query
                 expedition_data_map = expedition_service.get_all_expedition_responses_bulk()
@@ -2154,21 +2108,26 @@ class BotApplication:
                     analytics["value_analysis"]["consumed_value"] += exp_data['consumed_value']
                     analytics["value_analysis"]["pending_value"] += exp_data['remaining_value']
 
-                    # Progress analysis
+                    # Progress analysis - use model method for categorization
+                    from models.expedition import ExpeditionResponse, ExpeditionStatus
                     completion_rate = exp_data['completion_percentage']
                     total_completion_percentage += completion_rate
                     expeditions_with_progress += 1
 
-                    if exp_data['status'] == 'completed':
-                        analytics["progress_analysis"]["expeditions_by_progress"]["completed"] += 1
-                    elif completion_rate >= 75:
-                        analytics["progress_analysis"]["expeditions_by_progress"]["75-100%"] += 1
-                    elif completion_rate >= 50:
-                        analytics["progress_analysis"]["expeditions_by_progress"]["50-75%"] += 1
-                    elif completion_rate >= 25:
-                        analytics["progress_analysis"]["expeditions_by_progress"]["25-50%"] += 1
-                    else:
-                        analytics["progress_analysis"]["expeditions_by_progress"]["0-25%"] += 1
+                    # Use business logic from model
+                    status = ExpeditionStatus.from_string(exp_data['status'])
+                    progress_category = ExpeditionResponse.categorize_progress(status, completion_rate)
+
+                    # Map category to analytics buckets
+                    category_map = {
+                        "completed": "completed",
+                        "almost_done": "75-100%",
+                        "in_progress": "50-75%",
+                        "started": "25-50%",
+                        "not_started": "0-25%"
+                    }
+                    analytics_bucket = category_map.get(progress_category, "0-25%")
+                    analytics["progress_analysis"]["expeditions_by_progress"][analytics_bucket] += 1
 
                     # Timeline analysis
                     created_at = None
@@ -2199,14 +2158,16 @@ class BotApplication:
                 return jsonify(analytics)
 
             except Exception as e:
+                from utils.api_responses import internal_error
                 self.logger.error(f"Dashboard analytics API error: {e}")
-                return jsonify({"error": "Internal server error"}), 500
+                return internal_error()
 
         @app.route("/api/expeditions/consumptions", methods=["GET"])
         def api_expedition_consumptions():
             """API endpoint for expedition consumptions with filtering."""
             try:
                 from core.modern_service_container import get_expedition_service, get_user_service
+                from utils.api_responses import auth_required_error, permission_denied_error, validation_error
 
                 expedition_service = get_expedition_service()
                 user_service = get_user_service(None)
@@ -2214,15 +2175,15 @@ class BotApplication:
                 # Check authentication - require admin+ permission
                 chat_id = request.headers.get('X-Chat-ID')
                 if not chat_id:
-                    return jsonify({"error": "Authentication required"}), 401
+                    return auth_required_error()
 
                 try:
                     chat_id = int(chat_id)
                     user_level = user_service.get_user_permission_level(chat_id)
                     if not user_level or user_level.value not in ['owner', 'admin']:
-                        return jsonify({"error": "Admin permission required"}), 403
+                        return permission_denied_error("Admin permission required")
                 except (ValueError, TypeError):
-                    return jsonify({"error": "Invalid chat ID"}), 400
+                    return validation_error("Invalid chat ID")
 
                 # Parse query parameters
                 consumer_name = request.args.get('consumer_name')
@@ -2231,70 +2192,22 @@ class BotApplication:
                 # Get unpaid consumptions if payment_status is pending
                 if payment_status == 'pending':
                     consumptions = expedition_service.get_unpaid_consumptions(consumer_name)
-                    consumptions_data = []
-                    for consumption in consumptions:
-                        consumptions_data.append({
-                            "id": consumption.id,
-                            "expedition_id": consumption.expedition_id,
-                            "expedition_name": consumption.expedition_name,
-                            "consumer_name": consumption.consumer_name,
-                            "product_name": consumption.product_name,
-                            "quantity": consumption.quantity,
-                            "unit_price": float(consumption.unit_price),
-                            "total_price": float(consumption.total_price),
-                            "payment_status": consumption.payment_status.value,
-                            "consumed_at": consumption.consumed_at.isoformat() if consumption.consumed_at else None
-                        })
-                    return jsonify({"consumptions": consumptions_data})
+                    return jsonify({"consumptions": [c.to_dict() for c in consumptions]})
 
                 # For other cases, get user consumptions if specified
                 if consumer_name:
                     consumptions = expedition_service.get_user_consumptions(consumer_name)
-                    consumptions_data = []
-                    for consumption in consumptions:
-                        consumptions_data.append({
-                            "id": consumption.id,
-                            "expedition_id": consumption.expedition_id,
-                            "consumer_name": consumption.consumer_name,
-                            "product_id": consumption.product_id,
-                            "quantity": consumption.quantity,
-                            "unit_price": float(consumption.unit_price),
-                            "total_price": float(consumption.total_price),
-                            "payment_status": consumption.payment_status.value,
-                            "consumed_at": consumption.consumed_at.isoformat() if consumption.consumed_at else None
-                        })
-                    return jsonify({"consumptions": consumptions_data})
+                    return jsonify({"consumptions": [c.to_dict() for c in consumptions]})
 
-                # If no specific filters, return recent consumptions from all expeditions
-                all_expeditions = expedition_service.get_active_expeditions()
-                all_consumptions = []
+                # If no specific filters, return recent consumptions from all expeditions in single query
+                recent_consumptions = expedition_service.get_recent_consumptions(limit=50)
 
-                for expedition in all_expeditions[:10]:  # Limit to 10 most recent expeditions
-                    expedition_consumptions = expedition_service.get_expedition_consumptions(expedition.id)
-                    all_consumptions.extend(expedition_consumptions)
-
-                # Sort by consumed_at (most recent first)
-                all_consumptions.sort(key=lambda x: x.consumed_at or datetime.min, reverse=True)
-
-                consumptions_data = []
-                for consumption in all_consumptions[:50]:  # Limit to 50 most recent
-                    consumptions_data.append({
-                        "id": consumption.id,
-                        "expedition_id": consumption.expedition_id,
-                        "consumer_name": consumption.consumer_name,
-                        "product_id": consumption.product_id,
-                        "quantity": consumption.quantity,
-                        "unit_price": float(consumption.unit_price),
-                        "total_price": float(consumption.total_price),
-                        "payment_status": consumption.payment_status.value,
-                        "consumed_at": consumption.consumed_at.isoformat() if consumption.consumed_at else None
-                    })
-
-                return jsonify({"consumptions": consumptions_data})
+                return jsonify({"consumptions": [c.to_dict() for c in recent_consumptions]})
 
             except Exception as e:
+                from utils.api_responses import internal_error
                 self.logger.error(f"Expedition consumptions API error: {e}")
-                return jsonify({"error": "Internal server error"}), 500
+                return internal_error()
 
         @app.route("/api/expeditions/consumptions/<int:consumption_id>/pay", methods=["POST"])
         def api_pay_consumption(consumption_id):

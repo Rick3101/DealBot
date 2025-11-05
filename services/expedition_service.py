@@ -138,6 +138,52 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
         results = self._execute_cached_query(query, (ExpeditionStatus.ACTIVE.value,), cache_ttl=60, fetch_all=True)
         return [Expedition.from_db_row(row) for row in results or []]
 
+    def get_expeditions_summary(
+        self,
+        chat_id: Optional[int] = None,
+        status_filter: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: int = 0
+    ) -> List[Expedition]:
+        """
+        Get summary of expeditions for list view with optional filtering.
+
+        Args:
+            chat_id: Optional owner chat ID to filter by owner
+            status_filter: Optional status to filter ('active', 'completed', 'cancelled')
+            limit: Optional limit for pagination
+            offset: Offset for pagination (default: 0)
+
+        Returns:
+            List of Expedition objects with basic details
+        """
+        query = """
+            SELECT id, name, owner_chat_id, status, deadline, created_at, completed_at
+            FROM expeditions
+            WHERE 1=1
+        """
+
+        params = []
+
+        # Add filters
+        if chat_id is not None:
+            query += " AND owner_chat_id = %s"
+            params.append(chat_id)
+
+        if status_filter:
+            query += " AND status = %s"
+            params.append(status_filter)
+
+        query += " ORDER BY created_at DESC"
+
+        # Add pagination
+        if limit is not None:
+            query += " LIMIT %s OFFSET %s"
+            params.extend([limit, offset])
+
+        results = self._execute_query(query, tuple(params) if params else None, fetch_all=True)
+        return [Expedition.from_db_row(row) for row in results or []]
+
     def get_overdue_expeditions(self) -> List[Expedition]:
         """Get expeditions that are past their deadline."""
         query = """
@@ -196,22 +242,42 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
             raise ValidationError(f"Invalid item data: {', '.join(validation_errors)}")
 
         # Validate product exists if product service is available
+        product = None
         if self._product_service:
             product = self._product_service.get_product_by_id(item_request.produto_id)
             if not product:
                 raise NotFoundError(f"Product {item_request.produto_id} not found")
 
-        # Insert the item
+        # Count existing items in expedition for sequence number
+        count_query = "SELECT COUNT(*) FROM expedition_items WHERE expedition_id = %s"
+        count_result = self._execute_query(count_query, (item_request.expedition_id,), fetch_one=True)
+        item_sequence = count_result[0] if count_result else 0
+
+        # Generate encrypted product name
+        from utils.encryption import generate_encrypted_product_name
+        encrypted_name = generate_encrypted_product_name(
+            item_request.expedition_id,
+            item_request.produto_id,
+            item_sequence
+        )
+
+        # Insert the item with encrypted name
         query = """
-            INSERT INTO expedition_items (expedition_id, produto_id, quantity_required, created_at)
-            VALUES (%s, %s, %s, %s)
-            RETURNING id, expedition_id, produto_id, quantity_required, quantity_consumed, created_at
+            INSERT INTO expedition_items (
+                expedition_id, produto_id, quantity_required,
+                encrypted_product_name, original_product_name, created_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id, expedition_id, produto_id, quantity_required,
+                      quantity_consumed, encrypted_product_name, created_at
         """
 
         params = (
             item_request.expedition_id,
             item_request.produto_id,
             item_request.quantity_required,
+            encrypted_name,
+            product.nome if product else None,
             datetime.now()
         )
 
@@ -222,7 +288,8 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
         self._log_operation("AddExpeditionItem",
                           expedition_id=item_request.expedition_id,
                           product_id=item_request.produto_id,
-                          quantity=item_request.quantity_required)
+                          quantity=item_request.quantity_required,
+                          encrypted_name=encrypted_name)
 
         # Invalidate expedition cache after adding item
         self._invalidate_expedition_cache(item_request.expedition_id)
@@ -318,7 +385,8 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
     def get_expedition_items(self, expedition_id: int) -> List[ExpeditionItem]:
         """Get all items for an expedition."""
         query = """
-            SELECT id, expedition_id, produto_id, quantity_required, quantity_consumed, created_at
+            SELECT id, expedition_id, produto_id, quantity_required,
+                   quantity_consumed, encrypted_product_name, created_at
             FROM expedition_items
             WHERE expedition_id = %s
             ORDER BY created_at ASC
@@ -326,6 +394,81 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
 
         results = self._execute_query(query, (expedition_id,), fetch_all=True)
         return [ExpeditionItem.from_db_row(row) for row in results or []]
+
+    def get_decrypted_items(
+        self,
+        expedition_id: int,
+        owner_key: str
+    ) -> List[ExpeditionItemWithProduct]:
+        """
+        Get items with decrypted names for expedition owner.
+        Verifies owner_key before returning real product names.
+
+        Args:
+            expedition_id: Expedition identifier
+            owner_key: Owner's decryption key
+
+        Returns:
+            List of ExpeditionItemWithProduct with real names
+
+        Raises:
+            NotFoundError: If expedition not found
+            ValidationError: If owner_key is invalid
+        """
+        # Verify expedition exists and owner_key matches
+        expedition = self.get_expedition_by_id(expedition_id)
+        if not expedition:
+            raise NotFoundError(f"Expedition {expedition_id} not found")
+
+        if not expedition.owner_key:
+            raise ValidationError("Expedition does not have encryption enabled")
+
+        if expedition.owner_key != owner_key:
+            raise ValidationError("Invalid owner key")
+
+        # Get items with product details - use real names
+        query = """
+            SELECT ei.id, ei.produto_id, p.nome as product_name, p.emoji as product_emoji,
+                   ei.quantity_required as quantity_needed,
+                   COALESCE(
+                       ei.target_unit_price,
+                       (SELECT AVG(e2.preco) FROM Estoque e2
+                        WHERE e2.produto_id = ei.produto_id AND e2.quantidade_restante > 0),
+                       0
+                   ) as unit_price,
+                   COALESCE(ei.quantity_consumed, 0) as quantity_consumed,
+                   ei.created_at as added_at,
+                   ei.encrypted_product_name,
+                   ei.original_product_name
+            FROM expedition_items ei
+            JOIN produtos p ON ei.produto_id = p.id
+            WHERE ei.expedition_id = %s
+            ORDER BY ei.created_at ASC
+        """
+
+        results = self._execute_query(query, (expedition_id,), fetch_all=True)
+
+        items = []
+        for row in results or []:
+            item = ExpeditionItemWithProduct(
+                id=row[0],
+                produto_id=row[1],
+                product_name=row[2],  # Real product name
+                product_emoji=row[3] or '',
+                quantity_needed=row[4],
+                unit_price=Decimal(str(row[5])) if row[5] else Decimal('0'),
+                quantity_consumed=row[6] or 0,
+                added_at=row[7],
+                encrypted_product_name=row[8],
+                original_product_name=row[9] or row[2]  # Use original or fallback to real name
+            )
+            items.append(item)
+
+        self._log_operation("GetDecryptedItems",
+                          expedition_id=expedition_id,
+                          item_count=len(items))
+
+        return items
 
     def consume_item(self, request: ItemConsumptionRequest) -> Assignment:
         """
@@ -655,26 +798,36 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
         results = self._execute_query(query, (consumer_name,), fetch_all=True)
         return [Assignment.from_db_row(row) for row in results or []]
 
-    def get_expedition_details_optimized(self, expedition_id: int) -> Optional[dict]:
+    def get_expedition_details_optimized(self, expedition_id: int, requesting_chat_id: Optional[int] = None) -> Optional[dict]:
         """
         Get complete expedition data in a SINGLE optimized query with JOINs.
         This method reduces database round-trips from 10+ to 1.
 
+        Args:
+            expedition_id: The expedition ID to fetch
+            requesting_chat_id: Optional chat ID of the requesting user for ownership verification
+
         Returns a raw dictionary with all expedition data including:
         - Expedition details
         - Items with product information
-        - Consumptions with product information
+        - Consumptions with product information (with original_name only for owners)
+
+        Security:
+        - If requesting_chat_id matches expedition owner_chat_id, includes original_name in consumptions
+        - If requesting_chat_id is None or doesn't match owner, original_name is excluded
         """
         cache = get_query_cache()
-        cache_key_query = f"expedition_details_{expedition_id}"
+        # SECURITY: Include requesting_chat_id in cache key to prevent leaking encrypted_identity
+        cache_key_query = f"expedition_details_{expedition_id}_user_{requesting_chat_id}"
 
         # Check cache first (60 second TTL)
-        cached_result = cache.get(cache_key_query, (expedition_id,))
+        cached_result = cache.get(cache_key_query, (expedition_id, requesting_chat_id))
         if cached_result is not None:
-            self.logger.debug(f"Cache hit for expedition {expedition_id}")
+            self.logger.debug(f"Cache hit for expedition {expedition_id}, user {requesting_chat_id}")
             return cached_result
 
         # Single optimized query with JOINs
+        # SECURITY: Pass requesting_chat_id to conditionally include encrypted_identity for owners
         query = """
         WITH expedition_data AS (
             SELECT
@@ -697,7 +850,9 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
                     0
                 ) as unit_price,
                 COALESCE(ei.quantity_consumed, 0) as quantity_consumed,
-                ei.created_at as added_at
+                ei.created_at as added_at,
+                ei.encrypted_product_name,
+                ei.original_product_name
             FROM expedition_items ei
             JOIN produtos p ON ei.produto_id = p.id
             WHERE ei.expedition_id = %s
@@ -706,9 +861,14 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
         consumptions_data AS (
             SELECT
                 ea.id,
-                -- SECURITY: original_name is now NULL (encrypted), use pirate_name
+                -- SECURITY: Use pirate_name as default consumer_name
                 COALESCE(ep.pirate_name, 'Unknown Pirate') as consumer_name,
                 COALESCE(ep.pirate_name, 'Unknown Pirate') as pirate_name,
+                -- SECURITY: Include encrypted_identity for owner decryption
+                CASE
+                    WHEN e.owner_chat_id = %s THEN ep.encrypted_identity
+                    ELSE NULL
+                END as encrypted_identity,
                 p.nome as product_name,
                 ea.consumed_quantity as quantity,
                 ea.unit_price,
@@ -719,11 +879,13 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
                     0
                 ) as amount_paid,
                 ea.payment_status,
-                ea.assigned_at as consumed_at
+                ea.assigned_at as consumed_at,
+                ei.encrypted_product_name
             FROM expedition_assignments ea
             LEFT JOIN expedition_pirates ep ON ea.pirate_id = ep.id
             JOIN expedition_items ei ON ea.expedition_item_id = ei.id
             JOIN produtos p ON ei.produto_id = p.id
+            JOIN expeditions e ON ea.expedition_id = e.id
             WHERE ea.expedition_id = %s
             ORDER BY ea.assigned_at DESC
         )
@@ -734,9 +896,13 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
         """
 
         try:
+            # Pass requesting_chat_id for ownership check in consumptions CTE
+            # Parameters: expedition_id (3 times) + requesting_chat_id (1 time for ownership check in CASE)
+            query_params = (expedition_id, expedition_id, requesting_chat_id, expedition_id)
+
             result = self._execute_query(
                 query,
-                (expedition_id, expedition_id, expedition_id),
+                query_params,
                 fetch_one=True
             )
 
@@ -752,6 +918,66 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
             if not expedition_json:
                 return None
 
+            # SECURITY: Decrypt encrypted_identity for owners to get original_name
+            is_owner = (requesting_chat_id and expedition_json and
+                       expedition_json.get('owner_chat_id') == requesting_chat_id)
+
+            if is_owner and consumptions_json:
+                # Get owner_key from expedition
+                owner_key_query = "SELECT owner_key FROM expeditions WHERE id = %s"
+                owner_key_result = self._execute_query(owner_key_query, (expedition_id,), fetch_one=True)
+                owner_key = owner_key_result[0] if owner_key_result and owner_key_result[0] else None
+
+                if owner_key:
+                    try:
+                        from utils.encryption import get_encryption_service
+                        encryption_service = get_encryption_service()
+
+                        # Decrypt each consumption's encrypted_identity to get original_name
+                        for consumption in consumptions_json:
+                            encrypted_id = consumption.get('encrypted_identity')
+                            pirate_name = consumption.get('pirate_name')
+
+                            if encrypted_id:
+                                try:
+                                    # Decrypt the identity mapping
+                                    # ExpeditionEncryption.decrypt_name_mapping takes only 2 args: (encrypted_data, key)
+                                    decrypted_mapping = encryption_service.decrypt_name_mapping(
+                                        encrypted_id,
+                                        owner_key
+                                    )
+
+                                    # Find original name for this pirate
+                                    if decrypted_mapping:
+                                        # The decrypted result has structure: {'expedition_id': X, 'mapping': {original: pirate}, 'timestamp': T}
+                                        # Extract the inner mapping
+                                        actual_mapping = decrypted_mapping.get('mapping', {}) if isinstance(decrypted_mapping, dict) else {}
+
+                                        # The mapping is {original_name: pirate_name}, find by pirate_name
+                                        original_name = None
+                                        for orig, pirate in actual_mapping.items():
+                                            if pirate == pirate_name:
+                                                original_name = orig
+                                                break
+
+                                        if original_name:
+                                            consumption['original_name'] = original_name
+                                            self.logger.debug(f"Decrypted original_name: {original_name[:10]}... for pirate: {pirate_name[:20]}...")
+                                except Exception as decrypt_error:
+                                    self.logger.error(f"Failed to decrypt identity for consumption {consumption.get('id')}: {decrypt_error}")
+
+                            # Remove encrypted_identity from response (not needed by frontend)
+                            consumption.pop('encrypted_identity', None)
+                    except Exception as e:
+                        self.logger.error(f"Failed to decrypt identities: {e}")
+                else:
+                    self.logger.warning(f"No owner_key found for expedition {expedition_id}, cannot decrypt original names")
+
+            # Remove encrypted_identity from non-owner responses
+            if not is_owner and consumptions_json:
+                for consumption in consumptions_json:
+                    consumption.pop('encrypted_identity', None)
+
             response_data = {
                 'expedition': expedition_json,
                 'items': items_json if items_json else [],
@@ -759,7 +985,8 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
             }
 
             # Cache the result for 60 seconds
-            cache.set(cache_key_query, (expedition_id,), response_data, ttl=60)
+            # SECURITY: Cache key includes requesting_chat_id to segregate owner/non-owner data
+            cache.set(cache_key_query, (expedition_id, requesting_chat_id), response_data, ttl=60)
 
             self.logger.debug(f"Fetched expedition {expedition_id} with optimized query")
             return response_data
@@ -768,13 +995,20 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
             self.logger.error(f"Failed to fetch expedition details: {e}", exc_info=True)
             return None
 
-    def get_expedition_response(self, expedition_id: int) -> Optional[ExpeditionResponse]:
+    def get_expedition_response(self, expedition_id: int, requesting_chat_id: Optional[int] = None) -> Optional[ExpeditionResponse]:
         """
         Get complete expedition data with progress statistics.
         Now uses optimized single-query approach with caching.
+
+        Args:
+            expedition_id: The expedition ID to fetch
+            requesting_chat_id: Optional chat ID for ownership verification (to show original_name)
+
+        Security:
+        - Passes requesting_chat_id to optimized query for conditional original_name inclusion
         """
-        # Try optimized query first
-        raw_data = self.get_expedition_details_optimized(expedition_id)
+        # Try optimized query first with requesting_chat_id for ownership check
+        raw_data = self.get_expedition_details_optimized(expedition_id, requesting_chat_id)
         if not raw_data:
             # Fallback to original multi-query approach
             expedition = self.get_expedition_by_id(expedition_id)
@@ -808,7 +1042,9 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
                                 quantity_needed=item.quantity_required,
                                 unit_price=unit_price,
                                 quantity_consumed=item.quantity_consumed,
-                                added_at=item.created_at
+                                added_at=item.created_at,
+                                encrypted_product_name=item.encrypted_product_name,
+                                original_product_name=product.nome
                             )
                         )
 
@@ -816,15 +1052,16 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
             consumptions = self.get_expedition_consumptions(expedition_id)
             consumptions_with_product = []
             for consumption in consumptions:
-                # Get product name from expedition item
+                # Get product name and encrypted name from expedition item
                 item_query = """
-                    SELECT p.nome
+                    SELECT p.nome, ei.encrypted_product_name
                     FROM expedition_items ei
                     JOIN produtos p ON ei.produto_id = p.id
                     WHERE ei.id = %s
                 """
                 item_result = self._execute_query(item_query, (consumption.expedition_item_id,), fetch_one=True)
                 product_name = item_result[0] if item_result else "Unknown"
+                encrypted_product_name = item_result[1] if item_result and len(item_result) > 1 else None
 
                 consumptions_with_product.append(
                     ItemConsumptionWithProduct(
@@ -837,7 +1074,8 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
                         total_price=consumption.total_cost,
                         amount_paid=consumption.amount_paid,
                         payment_status=consumption.payment_status,
-                        consumed_at=consumption.consumed_at
+                        consumed_at=consumption.consumed_at,
+                        encrypted_product_name=encrypted_product_name
                     )
                 )
 
@@ -866,7 +1104,9 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
                 quantity_needed=item_data['quantity_needed'],
                 unit_price=Decimal(str(item_data['unit_price'])) if item_data.get('unit_price') else Decimal('0'),
                 quantity_consumed=item_data['quantity_consumed'] or 0,
-                added_at=datetime.fromisoformat(item_data['added_at']) if item_data.get('added_at') else None
+                added_at=datetime.fromisoformat(item_data['added_at']) if item_data.get('added_at') else None,
+                encrypted_product_name=item_data.get('encrypted_product_name'),
+                original_product_name=item_data.get('original_product_name')
             ))
 
         # Parse consumptions
@@ -882,7 +1122,9 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
                 total_price=Decimal(str(consumption_data['total_price'])),
                 amount_paid=Decimal(str(consumption_data.get('amount_paid', 0))),
                 payment_status=PaymentStatus.from_string(consumption_data['payment_status']),
-                consumed_at=datetime.fromisoformat(consumption_data['consumed_at']) if consumption_data.get('consumed_at') else None
+                consumed_at=datetime.fromisoformat(consumption_data['consumed_at']) if consumption_data.get('consumed_at') else None,
+                encrypted_product_name=consumption_data.get('encrypted_product_name'),
+                original_name=consumption_data.get('original_name')  # Will be None for non-owners
             ))
 
         return ExpeditionResponse.create(expedition, items, consumptions)
@@ -1852,6 +2094,192 @@ class ExpeditionService(BaseService, IExpeditionService, IAssignmentService):
         pattern = f"expedition_details_{expedition_id}"
         invalidated = cache.invalidate(pattern)
         self.logger.debug(f"Invalidated {invalidated} cache entries for expedition {expedition_id}")
+
+    def get_overdue_expeditions_with_details(self) -> List[Dict]:
+        """
+        Get all overdue expeditions with progress details in a single optimized query.
+        Eliminates N+1 pattern by using JOINs and aggregations.
+
+        Returns:
+            List of dictionaries with expedition data and progress
+        """
+        query = """
+        WITH product_avg_prices AS (
+            SELECT
+                produto_id,
+                AVG(preco) as avg_price
+            FROM Estoque
+            WHERE quantidade_restante > 0
+            GROUP BY produto_id
+        ),
+        expedition_progress AS (
+            SELECT
+                e.id as expedition_id,
+                e.name,
+                e.owner_chat_id,
+                e.status,
+                e.deadline,
+                e.created_at,
+                e.completed_at,
+                COUNT(DISTINCT ei.id) as total_items,
+                COALESCE(SUM(ei.quantity_required), 0) as total_quantity_needed,
+                COALESCE(SUM(ei.quantity_consumed), 0) as total_quantity_consumed,
+                COALESCE(SUM(CASE WHEN ei.quantity_consumed >= ei.quantity_required THEN 1 ELSE 0 END), 0) as completed_items,
+                COALESCE(SUM(ei.quantity_required * COALESCE(ei.target_unit_price, pap.avg_price, 0)), 0) as total_value,
+                COALESCE(SUM(ei.quantity_consumed * COALESCE(ei.target_unit_price, pap.avg_price, 0)), 0) as consumed_value
+            FROM expeditions e
+            LEFT JOIN expedition_items ei ON e.id = ei.expedition_id
+            LEFT JOIN product_avg_prices pap ON ei.produto_id = pap.produto_id
+            WHERE e.status = %s
+              AND e.deadline IS NOT NULL
+              AND e.deadline < NOW()
+            GROUP BY e.id, e.name, e.owner_chat_id, e.status, e.deadline, e.created_at, e.completed_at
+        )
+        SELECT
+            expedition_id,
+            name,
+            owner_chat_id,
+            status,
+            deadline,
+            created_at,
+            completed_at,
+            total_items,
+            completed_items,
+            (total_items - completed_items) as remaining_items,
+            total_quantity_needed,
+            total_quantity_consumed,
+            CASE
+                WHEN total_quantity_needed > 0
+                THEN ROUND((total_quantity_consumed::numeric / total_quantity_needed::numeric * 100), 2)
+                ELSE 0
+            END as completion_percentage,
+            total_value,
+            consumed_value,
+            (total_value - consumed_value) as remaining_value
+        FROM expedition_progress
+        ORDER BY deadline ASC
+        """
+
+        try:
+            results = self._execute_query(
+                query,
+                (ExpeditionStatus.ACTIVE.value,),
+                fetch_all=True
+            )
+
+            if not results:
+                return []
+
+            # Build list of expedition dictionaries
+            expeditions_data = []
+            for row in results:
+                expeditions_data.append({
+                    "id": row[0],
+                    "name": row[1],
+                    "owner_chat_id": row[2],
+                    "status": row[3],
+                    "deadline": row[4].isoformat() if row[4] else None,
+                    "created_at": row[5].isoformat() if row[5] else None,
+                    "completed_at": row[6].isoformat() if row[6] else None,
+                    "total_items": int(row[7]),
+                    "completed_items": int(row[8]),
+                    "remaining_items": int(row[9]),
+                    "total_quantity_needed": int(row[10]),
+                    "total_quantity_consumed": int(row[11]),
+                    "completion_percentage": float(row[12]),
+                    "total_value": float(row[13]),
+                    "consumed_value": float(row[14]),
+                    "remaining_value": float(row[15])
+                })
+
+            self.logger.debug(f"Fetched {len(expeditions_data)} overdue expeditions with details in single query")
+            return expeditions_data
+
+        except Exception as e:
+            self.logger.error(f"Failed to fetch overdue expeditions with details: {e}", exc_info=True)
+            return []
+
+    def get_recent_consumptions(self, limit: int = 50, expedition_ids: Optional[List[int]] = None) -> List[ItemConsumptionWithProduct]:
+        """
+        Get recent consumptions across all or specific expeditions in a single optimized query.
+        Eliminates N+1 pattern by using JOINs.
+
+        Args:
+            limit: Maximum number of consumptions to return (default: 50)
+            expedition_ids: Optional list of expedition IDs to filter by
+
+        Returns:
+            List of ItemConsumptionWithProduct objects
+        """
+        query = """
+        SELECT
+            ea.id,
+            COALESCE(ep.pirate_name, 'Unknown Pirate') as consumer_name,
+            COALESCE(ep.pirate_name, 'Unknown Pirate') as pirate_name,
+            p.nome as product_name,
+            ea.consumed_quantity as quantity,
+            ea.unit_price,
+            ea.total_cost as total_price,
+            COALESCE(
+                (SELECT SUM(payment_amount) FROM expedition_payments
+                 WHERE assignment_id = ea.id AND payment_status = 'completed'),
+                0
+            ) as amount_paid,
+            ea.payment_status,
+            ea.assigned_at as consumed_at,
+            ei.encrypted_product_name
+        FROM expedition_assignments ea
+        LEFT JOIN expedition_pirates ep ON ea.pirate_id = ep.id
+        JOIN expedition_items ei ON ea.expedition_item_id = ei.id
+        JOIN produtos p ON ei.produto_id = p.id
+        JOIN expeditions e ON ea.expedition_id = e.id
+        WHERE e.status = %s
+        """
+
+        params = [ExpeditionStatus.ACTIVE.value]
+
+        # Add expedition filter if specified
+        if expedition_ids:
+            placeholders = ','.join(['%s'] * len(expedition_ids))
+            query += f" AND ea.expedition_id IN ({placeholders})"
+            params.extend(expedition_ids)
+
+        query += """
+        ORDER BY ea.assigned_at DESC
+        LIMIT %s
+        """
+        params.append(limit)
+
+        try:
+            results = self._execute_query(query, tuple(params), fetch_all=True)
+
+            if not results:
+                return []
+
+            # Build list of consumption objects
+            consumptions = []
+            for row in results:
+                consumption = ItemConsumptionWithProduct(
+                    id=row[0],
+                    consumer_name=row[1],
+                    pirate_name=row[2],
+                    product_name=row[3],
+                    quantity=row[4],
+                    unit_price=Decimal(str(row[5])),
+                    total_price=Decimal(str(row[6])),
+                    amount_paid=Decimal(str(row[7])) if row[7] else Decimal('0'),
+                    payment_status=PaymentStatus.from_string(row[8]),
+                    consumed_at=row[9],
+                    encrypted_product_name=row[10] if len(row) > 10 else None
+                )
+                consumptions.append(consumption)
+
+            self.logger.debug(f"Fetched {len(consumptions)} recent consumptions in single query")
+            return consumptions
+
+        except Exception as e:
+            self.logger.error(f"Failed to fetch recent consumptions: {e}", exc_info=True)
+            return []
 
     def _create_consumption_sale_record(self, assignment: Assignment, actual_amount: Decimal) -> None:
         """Create a sale record for completed consumption."""

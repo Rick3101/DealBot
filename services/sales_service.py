@@ -330,12 +330,41 @@ class SalesService(BaseService, ISalesService):
     def get_all_sales(self) -> List[Sale]:
         """
         Get all sales with items.
-        
+
         Returns:
             List of all sales
         """
         return self.get_sales_by_buyer(None)
-    
+
+    def get_sales_with_details(self, limit: int = 50) -> List['SaleWithDetails']:
+        """
+        Get sales with detailed information including payment status and product list.
+        Optimized single query for API responses.
+
+        Args:
+            limit: Maximum number of sales to return
+
+        Returns:
+            List of SaleWithDetails objects
+        """
+        from models.sale import SaleWithDetails
+
+        query = """
+            SELECT v.id, v.data_venda, v.comprador_nome, v.preco_total,
+                   CASE WHEN p.valor_pago >= v.preco_total THEN 'Pago' ELSE 'Pendente' END as status,
+                   STRING_AGG(pr.emoji || ' ' || pr.nome, ', ') as produtos
+            FROM Vendas v
+            LEFT JOIN Pagamentos p ON v.comprador_nome = p.usuario_nome
+            LEFT JOIN ItensVenda iv ON v.id = iv.venda_id
+            LEFT JOIN Produtos pr ON iv.produto_id = pr.id
+            GROUP BY v.id, v.data_venda, v.comprador_nome, v.preco_total, p.valor_pago
+            ORDER BY v.data_venda DESC
+            LIMIT %s
+        """
+
+        results = self._execute_query(query, (limit,), fetch_all=True)
+        return [SaleWithDetails.from_db_row(row) for row in results or []]
+
     def get_unpaid_sales(self, buyer_name: Optional[str] = None) -> List[SaleWithPayments]:
         """
         Get sales with outstanding balances.

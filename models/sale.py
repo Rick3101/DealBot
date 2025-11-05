@@ -190,15 +190,53 @@ class CreatePaymentRequest:
     """Request model for creating payments."""
     venda_id: int
     valor_pago: float
-    
+
     def validate(self) -> list[str]:
         """Validate the create payment request."""
         errors = []
-        
+
         if self.valor_pago <= 0:
             errors.append("Payment amount must be greater than 0")
-        
+
         if self.valor_pago > 999999.99:
             errors.append("Payment amount too high (maximum R$ 999,999.99)")
-        
+
         return errors
+
+
+@dataclass
+class SaleWithDetails:
+    """Sale with detailed information for API responses."""
+    id: int
+    date: datetime
+    customer: str
+    total: float
+    status: str
+    products: str  # Aggregated string of products with emojis
+
+    @classmethod
+    def from_db_row(cls, row: tuple) -> 'SaleWithDetails':
+        """Create SaleWithDetails from database row."""
+        if not row:
+            return None
+
+        id_, date, customer, total, status, products = row
+        return cls(
+            id=id_,
+            date=date,
+            customer=customer,
+            total=float(total),
+            status=status,
+            products=products or "N/A"
+        )
+
+    def to_dict(self) -> dict:
+        """Convert sale with details to dictionary for API responses."""
+        return {
+            "id": self.id,
+            "date": self.date.isoformat() if self.date else None,
+            "customer": self.customer,
+            "total": f"R$ {self.total:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+            "status": self.status,
+            "products": self.products
+        }

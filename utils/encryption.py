@@ -607,3 +607,75 @@ def validate_encryption_key(key: str) -> bool:
     """Quick function to validate encryption key format."""
     key_manager = SecureKeyManager()
     return key_manager.validate_key(key)
+
+
+# Product Name Encryption Functions
+import random
+import string
+
+
+def generate_encrypted_product_name(expedition_id: int, product_id: int, item_sequence: int) -> str:
+    """
+    Generate a unique encrypted product name for expedition items.
+
+    Format: PREFIX-XXXX where:
+    - PREFIX: Random from ['ITEM', 'CARGO', 'GOODS', 'SUPPLY']
+    - XXXX: 4-character alphanumeric code based on IDs
+
+    Args:
+        expedition_id: The expedition ID
+        product_id: The product ID
+        item_sequence: Sequence number of item in expedition
+
+    Returns:
+        Encrypted name like "ITEM-A7B3" or "CARGO-X9Z2"
+
+    Example:
+        >>> name = generate_encrypted_product_name(1, 100, 0)
+        >>> print(name)  # "CARGO-K7M9"
+    """
+    prefixes = ['ITEM', 'CARGO', 'GOODS', 'SUPPLY']
+
+    # Use expedition and product IDs to generate deterministic but obscured code
+    seed_value = (expedition_id * 1000 + product_id * 100 + item_sequence)
+    random.seed(seed_value)
+
+    # Generate 4-character alphanumeric code
+    chars = string.ascii_uppercase + string.digits
+    code = ''.join(random.choice(chars) for _ in range(4))
+
+    # Select prefix based on seed
+    prefix = prefixes[seed_value % len(prefixes)]
+
+    # Reset random seed to avoid affecting other operations
+    random.seed()
+
+    logger.debug(f"Generated encrypted product name: {prefix}-{code} for expedition {expedition_id}, product {product_id}, sequence {item_sequence}")
+
+    return f"{prefix}-{code}"
+
+
+def generate_encrypted_product_name_random(expedition_id: int) -> str:
+    """
+    Generate a completely random encrypted product name.
+
+    Args:
+        expedition_id: The expedition ID (for logging purposes)
+
+    Returns:
+        Random encrypted name like "CARGO-K7M9"
+
+    Example:
+        >>> name = generate_encrypted_product_name_random(1)
+        >>> print(name)  # "MERCH-P3Q8" (random each time)
+    """
+    prefixes = ['ITEM', 'CARGO', 'GOODS', 'SUPPLY', 'MERCH', 'STOCK']
+    prefix = random.choice(prefixes)
+
+    chars = string.ascii_uppercase + string.digits
+    code = ''.join(random.choice(chars) for _ in range(4))
+
+    encrypted_name = f"{prefix}-{code}"
+    logger.debug(f"Generated random encrypted product name: {encrypted_name} for expedition {expedition_id}")
+
+    return encrypted_name

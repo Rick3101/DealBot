@@ -97,7 +97,7 @@ class UpdateUserRequest:
     password: Optional[str] = None
     level: Optional[UserLevel] = None
     chat_id: Optional[int] = None
-    
+
     def has_updates(self) -> bool:
         """Check if request contains any updates."""
         return any([
@@ -106,3 +106,38 @@ class UpdateUserRequest:
             self.level is not None,
             self.chat_id is not None
         ])
+
+
+@dataclass
+class UserWithStats:
+    """User with statistics for API responses."""
+    username: str
+    level: str
+    total_purchases: float
+    last_access: Optional[str]
+    status: str = "Ativo"
+
+    @classmethod
+    def from_db_row(cls, row: tuple) -> 'UserWithStats':
+        """Create UserWithStats from database row."""
+        if not row:
+            return None
+
+        username, level, total_purchases, last_access = row
+        return cls(
+            username=username,
+            level=level.capitalize() if level else "User",
+            total_purchases=float(total_purchases or 0),
+            last_access=last_access,
+            status="Ativo"
+        )
+
+    def to_dict(self) -> dict:
+        """Convert user with stats to dictionary for API responses."""
+        return {
+            "username": self.username,
+            "level": self.level,
+            "total_purchases": f"R$ {self.total_purchases:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+            "last_access": self.last_access.isoformat() if self.last_access else None,
+            "status": self.status
+        }

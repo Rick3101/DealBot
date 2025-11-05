@@ -265,7 +265,39 @@ class UserService(BaseService, IUserService):
         users = self.user_repository.get_all_users()
         self._log_operation("users_listed", count=len(users))
         return users
-    
+
+    def get_users_with_stats(self, limit: int = None, offset: int = 0) -> List['UserWithStats']:
+        """
+        Get all users with purchase statistics.
+        Optimized single query for API responses.
+
+        Args:
+            limit: Maximum number of users to return (None for all)
+            offset: Number of users to skip (for pagination)
+
+        Returns:
+            List of UserWithStats objects
+        """
+        from models.user import UserWithStats
+
+        query = """
+            SELECT u.username, u.nivel,
+                   COALESCE(SUM(v.preco_total), 0) as total_compras,
+                   MAX(v.data_venda) as ultimo_acesso
+            FROM Usuarios u
+            LEFT JOIN Vendas v ON u.username = v.comprador_nome
+            GROUP BY u.username, u.nivel
+            ORDER BY total_compras DESC
+        """
+
+        params = []
+        if limit is not None:
+            query += " LIMIT %s OFFSET %s"
+            params = [limit, offset]
+
+        results = self._execute_query(query, params if params else None, fetch_all=True)
+        return [UserWithStats.from_db_row(row) for row in results or []]
+
     def username_exists(self, username: str, exclude_user_id: Optional[int] = None) -> bool:
         """
         Check if username already exists.

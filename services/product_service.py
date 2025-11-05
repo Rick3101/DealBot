@@ -60,14 +60,18 @@ class ProductService(BaseService, IProductService):
         self._log_operation("products_listed", count=len(products))
         return products
     
-    def get_products_with_stock(self) -> List[ProductWithStock]:
+    def get_products_with_stock(self, limit: int = None, offset: int = 0) -> List[ProductWithStock]:
         """
         Get all products with their current stock information.
+
+        Args:
+            limit: Maximum number of products to return (None for all)
+            offset: Number of products to skip (for pagination)
 
         Returns:
             List of products with stock information
         """
-        products_with_stock_data = self._product_repository.get_products_with_stock()
+        products_with_stock_data = self._product_repository.get_products_with_stock(limit=limit, offset=offset)
 
         products_with_stock = []
         for data in products_with_stock_data:

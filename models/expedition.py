@@ -111,6 +111,39 @@ class Expedition:
             return False
         return datetime.now() > self.deadline
 
+    def get_alert_level(self) -> str:
+        """Calculate alert level based on deadline and days overdue.
+
+        Returns:
+            str: Alert level - 'critical' (>7 days), 'urgent' (>3 days),
+                 'warning' (>1 day), or 'info' (not overdue/no deadline)
+        """
+        if not self.deadline or not self.is_active():
+            return "info"
+
+        days_overdue = (datetime.now() - self.deadline).days
+
+        if days_overdue > 7:
+            return "critical"
+        elif days_overdue > 3:
+            return "urgent"
+        elif days_overdue > 1:
+            return "warning"
+
+        return "info"
+
+    def get_days_overdue(self) -> int:
+        """Calculate number of days overdue.
+
+        Returns:
+            int: Days overdue (0 if not overdue or no deadline)
+        """
+        if not self.deadline or not self.is_active():
+            return 0
+
+        days = (datetime.now() - self.deadline).days
+        return max(0, days)
+
 
 @dataclass
 class ExpeditionItem:
@@ -120,6 +153,7 @@ class ExpeditionItem:
     produto_id: int
     quantity_required: int
     quantity_consumed: int = 0
+    encrypted_product_name: Optional[str] = None
     created_at: Optional[datetime] = None
 
     @classmethod
@@ -128,19 +162,28 @@ class ExpeditionItem:
         if not row:
             return None
 
-        id_, expedition_id, produto_id, quantity_required, quantity_consumed, created_at = row
+        # Support both old (6 cols) and new (7 cols) format for backward compatibility
+        if len(row) == 6:
+            # Old format without encrypted_product_name
+            id_, expedition_id, produto_id, quantity_required, quantity_consumed, created_at = row
+            encrypted_name = None
+        else:
+            # New format with encrypted_product_name
+            id_, expedition_id, produto_id, quantity_required, quantity_consumed, encrypted_name, created_at = row
+
         return cls(
             id=id_,
             expedition_id=expedition_id,
             produto_id=produto_id,
             quantity_required=quantity_required,
             quantity_consumed=quantity_consumed or 0,
+            encrypted_product_name=encrypted_name,
             created_at=created_at
         )
 
     def to_dict(self) -> dict:
         """Convert expedition item to dictionary."""
-        return {
+        result = {
             'id': self.id,
             'expedition_id': self.expedition_id,
             'produto_id': self.produto_id,
@@ -148,6 +191,12 @@ class ExpeditionItem:
             'quantity_consumed': self.quantity_consumed,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
+
+        # Add encrypted name if available
+        if self.encrypted_product_name:
+            result['encrypted_product_name'] = self.encrypted_product_name
+
+        return result
 
     def get_remaining_quantity(self) -> int:
         """Get remaining quantity needed."""
@@ -360,6 +409,8 @@ class ExpeditionItemWithProduct:
     quantity_needed: int
     unit_price: Decimal
     quantity_consumed: int
+    encrypted_product_name: Optional[str] = None
+    original_product_name: Optional[str] = None
     added_at: Optional[datetime] = None
 
     @classmethod
@@ -367,6 +418,15 @@ class ExpeditionItemWithProduct:
         """Create from database row with product join."""
         if not row or len(row) < 8:
             return None
+
+        # Support both old (8 cols) and new (10 cols with encrypted names) format
+        encrypted_name = None
+        original_name = None
+
+        if len(row) >= 10:
+            # New format with encrypted_product_name and original_product_name
+            encrypted_name = row[8]
+            original_name = row[9] if len(row) > 9 else None
 
         return cls(
             id=row[0],
@@ -376,21 +436,36 @@ class ExpeditionItemWithProduct:
             quantity_needed=row[4],
             unit_price=Decimal(str(row[5])) if row[5] else Decimal('0'),
             quantity_consumed=row[6] or 0,
-            added_at=row[7]
+            added_at=row[7],
+            encrypted_product_name=encrypted_name,
+            original_product_name=original_name
         )
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
-        return {
+        result = {
             'id': self.id,
             'product_id': self.produto_id,
-            'product_name': self.product_name,
-            'product_emoji': self.product_emoji,
             'quantity_needed': self.quantity_needed,
             'unit_price': float(self.unit_price),
             'quantity_consumed': self.quantity_consumed,
             'added_at': self.added_at.isoformat() if self.added_at else None
         }
+
+        # Use encrypted name if available, otherwise use regular product name
+        if self.encrypted_product_name:
+            result['product_name'] = self.encrypted_product_name
+            result['encrypted_product_name'] = self.encrypted_product_name
+            # Include original name for owner access
+            if self.original_product_name:
+                result['original_product_name'] = self.original_product_name
+        else:
+            # Backward compatibility: use actual product name
+            result['product_name'] = self.product_name
+
+        result['product_emoji'] = self.product_emoji
+
+        return result
 
 
 @dataclass
@@ -406,6 +481,8 @@ class ItemConsumptionWithProduct:
     amount_paid: Decimal
     payment_status: PaymentStatus
     consumed_at: Optional[datetime] = None
+    encrypted_product_name: Optional[str] = None
+    original_name: Optional[str] = None  # Only included for expedition owners
 
     @classmethod
     def from_db_row(cls, row: tuple) -> 'ItemConsumptionWithProduct':
@@ -423,12 +500,13 @@ class ItemConsumptionWithProduct:
             total_price=Decimal(str(row[6])),
             amount_paid=Decimal(str(row[7])) if row[7] is not None else Decimal('0.00'),
             payment_status=PaymentStatus.from_string(row[8]),
-            consumed_at=row[9]
+            consumed_at=row[9],
+            encrypted_product_name=row[10] if len(row) > 10 else None
         )
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
-        return {
+        result = {
             'id': self.id,
             'consumer_name': self.consumer_name,
             'pirate_name': self.pirate_name,
@@ -438,8 +516,15 @@ class ItemConsumptionWithProduct:
             'total_price': float(self.total_price),
             'amount_paid': float(self.amount_paid),
             'payment_status': self.payment_status.value,
-            'consumed_at': self.consumed_at.isoformat() if self.consumed_at else None
+            'consumed_at': self.consumed_at.isoformat() if self.consumed_at else None,
+            'encrypted_product_name': self.encrypted_product_name
         }
+
+        # SECURITY: Only include original_name if it's not None (owner-only field)
+        if self.original_name is not None:
+            result['original_name'] = self.original_name
+
+        return result
 
 
 @dataclass
@@ -503,6 +588,38 @@ class ExpeditionResponse:
             'remaining_value': float(self.remaining_value)
         }
 
+    def get_progress_category(self) -> str:
+        """Get progress category based on completion percentage.
+
+        Returns:
+            str: Progress category - 'completed', 'almost_done' (75%+),
+                 'in_progress' (50%+), 'started' (25%+), or 'not_started' (<25%)
+        """
+        return self.categorize_progress(self.expedition.status, self.completion_percentage)
+
+    @staticmethod
+    def categorize_progress(status: ExpeditionStatus, completion_percentage: float) -> str:
+        """Static helper to categorize progress without creating full ExpeditionResponse.
+
+        Args:
+            status: Expedition status
+            completion_percentage: Completion percentage (0-100)
+
+        Returns:
+            str: Progress category - 'completed', 'almost_done' (75%+),
+                 'in_progress' (50%+), 'started' (25%+), or 'not_started' (<25%)
+        """
+        if status == ExpeditionStatus.COMPLETED:
+            return "completed"
+        elif completion_percentage >= 75:
+            return "almost_done"
+        elif completion_percentage >= 50:
+            return "in_progress"
+        elif completion_percentage >= 25:
+            return "started"
+        else:
+            return "not_started"
+
 
 @dataclass
 class ItemConsumptionResponse:
@@ -513,11 +630,18 @@ class ItemConsumptionResponse:
     remaining_debt: Decimal
 
     def to_dict(self) -> dict:
-        """Convert consumption response to dictionary."""
+        """Convert consumption response to dictionary with flattened structure for API."""
         return {
-            'consumption': self.consumption.to_dict(),
+            'id': self.consumption.id,
+            'expedition_id': self.consumption.expedition_id,
             'expedition_name': self.expedition_name,
+            'consumer_name': self.consumption.consumer_name,
             'product_name': self.product_name,
+            'quantity': self.consumption.quantity_consumed,
+            'unit_price': float(self.consumption.unit_price),
+            'total_price': float(self.consumption.total_cost),
+            'payment_status': self.consumption.payment_status.value,
+            'consumed_at': self.consumption.consumed_at.isoformat() if self.consumption.consumed_at else None,
             'remaining_debt': float(self.remaining_debt)
         }
 

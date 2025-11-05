@@ -49,7 +49,9 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(nul)",
-      "Bash(NUL)"
+      "Bash(NUL)",
+      "Bash(psql:*)",
+      "Read(//c/Users/rikrd/source/**)"
     ],
     "deny": [],
     "ask": []

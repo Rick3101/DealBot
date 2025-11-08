@@ -1345,7 +1345,8 @@ class BramblerService(BaseService, IBramblerService):
         original_item_name: str,
         encrypted_name: Optional[str] = None,
         owner_key: Optional[str] = None,
-        item_type: str = 'product'
+        item_type: str = 'product',
+        product_id: Optional[int] = None
     ) -> Optional[Dict]:
         """
         Create new encrypted item with optional custom encrypted name.
@@ -1356,6 +1357,7 @@ class BramblerService(BaseService, IBramblerService):
             encrypted_name: Optional custom encrypted name (auto-generated if None)
             owner_key: Master encryption key
             item_type: Type of item (product, custom, resource)
+            product_id: Optional product ID reference from Produtos table
 
         Returns:
             Dict with created item data or None on failure
@@ -1418,11 +1420,11 @@ class BramblerService(BaseService, IBramblerService):
                     expedition_id, original_product_name, encrypted_product_name,
                     encrypted_mapping, anonymized_item_code, item_type,
                     quantity_required, quantity_consumed, item_status,
-                    created_by_chat_id
+                    created_by_chat_id, produto_id
                 )
-                VALUES (%s, NULL, %s, %s, %s, %s, 0, 0, 'active', %s)
+                VALUES (%s, NULL, %s, %s, %s, %s, 0, 0, 'active', %s, %s)
                 RETURNING id, encrypted_product_name, encrypted_mapping, anonymized_item_code,
-                          item_type, created_at
+                          item_type, created_at, produto_id
             """
 
             # Get owner chat_id for created_by field
@@ -1430,16 +1432,17 @@ class BramblerService(BaseService, IBramblerService):
 
             row = self._execute_query(
                 query,
-                (expedition_id, encrypted_name, encrypted_mapping, anonymized_code, item_type, owner_chat_id),
+                (expedition_id, encrypted_name, encrypted_mapping, anonymized_code, item_type, owner_chat_id, product_id),
                 fetch_one=True
             )
 
             if row:
-                item_id, enc_name, enc_mapping, anon_code, i_type, created_at = row
+                item_id, enc_name, enc_mapping, anon_code, i_type, created_at, prod_id = row
 
                 self._log_operation("encrypted_item_created",
                                   expedition_id=expedition_id,
-                                  encrypted_name=encrypted_name)
+                                  encrypted_name=encrypted_name,
+                                  product_id=prod_id)
 
                 # SECURITY: Return NULL for original_product_name to prevent leakage
                 return {
@@ -1451,7 +1454,8 @@ class BramblerService(BaseService, IBramblerService):
                     'anonymized_item_code': anon_code,
                     'item_type': i_type,
                     'created_at': created_at.isoformat() if created_at else None,
-                    'is_encrypted': True
+                    'is_encrypted': True,
+                    'product_id': prod_id  # NEW: Return product_id in response
                 }
 
             return None
@@ -1487,7 +1491,8 @@ class BramblerService(BaseService, IBramblerService):
                     ei.quantity_required,
                     ei.quantity_consumed,
                     ei.item_status,
-                    ei.created_at
+                    ei.created_at,
+                    ei.produto_id
                 FROM expedition_items ei
                 INNER JOIN Expeditions e ON ei.expedition_id = e.id
                 WHERE e.owner_chat_id = %s
@@ -1501,7 +1506,7 @@ class BramblerService(BaseService, IBramblerService):
             items = []
             if rows:
                 for row in rows:
-                    item_id, exp_id, exp_name, enc_name, enc_mapping, anon_code, i_type, qty_req, qty_cons, status, created_at = row
+                    item_id, exp_id, exp_name, enc_name, enc_mapping, anon_code, i_type, qty_req, qty_cons, status, created_at, prod_id = row
                     items.append({
                         'id': item_id,
                         'expedition_id': exp_id,
@@ -1514,7 +1519,8 @@ class BramblerService(BaseService, IBramblerService):
                         'quantity_consumed': qty_cons,
                         'item_status': status,
                         'created_at': created_at.isoformat() if created_at else None,
-                        'is_encrypted': True
+                        'is_encrypted': True,
+                        'product_id': prod_id  # NEW: Return product_id in response
                     })
 
             self._log_operation("all_encrypted_items_retrieved", count=len(items))

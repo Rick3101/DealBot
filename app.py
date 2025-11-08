@@ -1621,6 +1621,7 @@ class BotApplication:
                 encrypted_name = data.get('encrypted_name')  # Optional
                 owner_key = data.get('owner_key')
                 item_type = data.get('item_type', 'product')
+                product_id = data.get('product_id')  # NEW: Accept product_id from frontend
 
                 if not expedition_id:
                     return jsonify({"error": "expedition_id is required"}), 400
@@ -1641,7 +1642,8 @@ class BotApplication:
                     original_item_name=original_item_name,
                     encrypted_name=encrypted_name,
                     owner_key=owner_key,
-                    item_type=item_type
+                    item_type=item_type,
+                    product_id=product_id  # NEW: Pass product_id to service
                 )
 
                 if result:
